@@ -392,7 +392,7 @@ def lookup(identifiers, output, **kwargs):
                             i += 1
                             break
     if output:
-        console.print(f"Updated {output_path} with:")
+        console.print(f"Updated {output} with:")
         for obs, mjd in done:
             console.print(f"  - {obs}/{mjd}")
 
