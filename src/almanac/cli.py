@@ -464,7 +464,8 @@ def metadata(
         if mjds is None:
             mjds = []
             for obs in observatories:
-                mjds.extend(fp[f"raw/{obs}"])
+                if f"raw/{obs}" in fp:
+                    mjds.extend(fp[f"raw/{obs}"])
             mjds = list(set(mjds))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=p) as executor:
