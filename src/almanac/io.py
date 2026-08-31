@@ -57,8 +57,8 @@ def update(
 ):
     _print = print if verbose else lambda *args, **kwargs: None
 
-    group = get_or_create_group(fp, f"{observatory}/{mjd}")
-    _print(f"\t{observatory}/{mjd}")
+    group = get_or_create_group(fp, f"raw/{observatory}/{mjd}")
+    _print(f"\traw/{observatory}/{mjd}")
 
     delete_hdf5_entry(group, "exposures")
     write_models_to_hdf5_group(
@@ -66,17 +66,17 @@ def update(
         group.create_group("exposures", track_order=True)
     )
 
-    _print(f"\t{observatory}/{mjd}/exposures")
+    _print(f"\traw/{observatory}/{mjd}/exposures")
 
     if len(sequences) > 0:
         delete_hdf5_entry(group, "sequences")
         sequences_group = group.create_group("sequences")
         for image_type, entries in sequences.items():
             sequences_group.create_dataset(image_type, data=np.array(entries))
-            _print(f"\t{observatory}/{mjd}/sequences/{image_type}")
+            _print(f"\traw/{observatory}/{mjd}/sequences/{image_type}")
 
     if fibers:
-        fibers_group = get_or_create_group(fp, f"{observatory}/{mjd}/fibers")
+        fibers_group = get_or_create_group(fp, f"raw/{observatory}/{mjd}/fibers")
         done = set()
         for exposure in exposures:
             if not exposure.targets:
@@ -94,7 +94,7 @@ def update(
                 fibers_group.create_group(reference_id_string, track_order=True)
             )
             done.add(reference_id_string)
-            _print(f"\t{observatory}/{mjd}/fibers/{reference_id_string}")
+            _print(f"\traw/{observatory}/{mjd}/fibers/{reference_id_string}")
 
 
 
@@ -159,10 +159,11 @@ def get_hdf5_dtype(pydantic_type, sample_value=None):
         # Handle string length determination
         if dtype == 'S' and sample_value is not None:
             if isinstance(sample_value, (list, tuple, np.ndarray)):
-                max_len = max(len(str(v)) for v in sample_value)
+                max_len = max((len(str(v)) for v in sample_value), default=1)
             else:
                 max_len = len(str(sample_value)) if sample_value else 1
-            return f'S{max_len}'
+            # Guard against 'S0' (all-empty strings), which h5py rejects
+            return f'S{max(max_len, 1)}'
         elif dtype == 'S':
             return 'S100'  # Default string length
 
@@ -361,7 +362,7 @@ def _write_models_to_hdf5_group(
 
         chunks = (min(chunk_size, num_records),) if chunk_size is not None and num_records > chunk_size else None
         if field_data.ndim > 1 and chunks is not None:
-            chunks = (chunks[0], field_data.shape[-1])
+            chunks = (chunks[0], *field_data.shape[1:])
         compression_setting = compression if chunk_size is not None and num_records > chunk_size else None
 
         if getattr(field_spec, "annotation", None) is np.ndarray:
@@ -388,7 +389,7 @@ def _write_models_to_hdf5_group(
             # Handle variable-length data (like lists)
             if any(isinstance(value, list) for value in converted_data):
                 # Create variable-length dataset
-                dt = h5py.special_dtype(vlen=np.dtype(hdf5_dtype))
+                dt = h5.special_dtype(vlen=np.dtype(hdf5_dtype))
                 dataset = hdf5_group.create_dataset(
                     field_name,
                     (num_records,),

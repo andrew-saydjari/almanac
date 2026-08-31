@@ -180,9 +180,17 @@ def get_expected_number_of_exposures(observatory: str, mjd: int) -> int:
         )
     )
     try:
-        return q.scalar() - start
-    except:
+        max_exposure_no = q.scalar()
+    except Exception as e:
+        logger.warning(
+            f"Could not query expected exposures for {observatory}/{mjd} "
+            f"(database unavailable?): {e}"
+        )
         return -1
+    if max_exposure_no is None:
+        # No database rows for this observatory/MJD.
+        return -1
+    return max_exposure_no - start
 
 
 def organize_exposures(exposures: List[Exposure]) -> List[Exposure]:
