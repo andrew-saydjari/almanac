@@ -1,6 +1,5 @@
 #from itertools import batched
 import os
-import tempfile
 from tqdm import tqdm
 from typing import List
 from peewee import JOIN, BigIntegerField
@@ -24,6 +23,26 @@ def merge_dicts(*dicts):
     }
 
 
+def _copy_sdss_ids(database, table_name: str, sdss_ids):
+    """
+    Bulk-load SDSS IDs into a (temporary) table via PostgreSQL COPY,
+    supporting both psycopg2 and psycopg (v3) cursor APIs.
+    """
+    conn = database.connection()
+    cursor = conn.cursor()
+    if hasattr(cursor, "copy_from"):
+        # psycopg2
+        import io as _io
+        buf = _io.StringIO("".join(f"{sdss_id}\n" for sdss_id in sdss_ids))
+        cursor.copy_from(buf, table_name, columns=("sdss_id",))
+    else:
+        # psycopg (v3)
+        with cursor.copy(f"COPY {table_name} (sdss_id) FROM STDIN") as copy:
+            for sdss_id in sdss_ids:
+                copy.write_row((sdss_id,))
+    conn.commit()
+
+
 def query_targeting(sdss_ids: List[int], **kwargs):
     """
     Query the SDSS database for targeting (carton) information.
@@ -38,18 +57,7 @@ def query_targeting(sdss_ids: List[int], **kwargs):
         "CREATE TEMP TABLE tmp_sdss_ids (sdss_id BIGINT PRIMARY KEY)"
     )
 
-    # Create temporary CSV file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-        for sdss_id in sdss_ids:
-            f.write(f"{sdss_id}\n")
-        tmp_path = f.name
-
-    with open(tmp_path, 'r') as f:
-        cursor = cdb.database.connection().cursor()
-        cursor.copy_from(f, 'tmp_sdss_ids', columns=('sdss_id',))
-        cdb.database.connection().commit()
-
-    os.unlink(tmp_path)
+    _copy_sdss_ids(cdb.database, 'tmp_sdss_ids', sdss_ids)
 
     class Source(cdb.CatalogdbModel):
 
@@ -94,7 +102,7 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
     meta = {}
     tqdm_kwds = tqdm_kwds or {}
     with tqdm(desc="Querying catalog", total=len(sdss_ids), **tqdm_kwds) as pb:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=32) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=min(8, os.cpu_count() or 8)) as executor:
             futures = [
                 executor.submit(_query_catalog, batch, i)
                 for i, batch in enumerate(batched(sorted(sdss_ids), batch_size))
@@ -120,26 +128,15 @@ def _query_catalog(sdss_ids: List[int], suffix=""):
 
     from almanac.database import catalogdb as cdb, targetdb as tdb
 
-    # Create temporary CSV file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-        for sdss_id in sdss_ids:
-            f.write(f"{sdss_id}\n")
-        tmp_path = f.name
-
     cdb.database.execute_sql(
         f"CREATE TEMP TABLE tmp_sdss_ids{suffix} (sdss_id BIGINT PRIMARY KEY)"
     )
-    with open(tmp_path, 'r') as f:
-        cursor = cdb.database.connection().cursor()
-        cursor.copy_from(f, f'tmp_sdss_ids{suffix}', columns=('sdss_id',))
-        cdb.database.connection().commit()
+    _copy_sdss_ids(cdb.database, f"tmp_sdss_ids{suffix}", sdss_ids)
 
     cdb.database.execute_sql("SET enable_seqscan = off")
     cdb.database.execute_sql("SET enable_hashjoin = off")
     cdb.database.execute_sql("SET enable_mergejoin = off")
     cdb.database.execute_sql(f"ANALYZE tmp_sdss_ids{suffix}")
-
-    os.unlink(tmp_path)
 
     class Source(cdb.CatalogdbModel):
 
