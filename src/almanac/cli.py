@@ -1096,8 +1096,6 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
                     star_fields, star_dict, fp, callback=callback(tid_write_stars)
                 )
 
-            raise a
-
     if unknown_carton_pks:
         click.echo(f"Warning: {len(unknown_carton_pks):,} unknown cartons encountered")
 

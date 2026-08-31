@@ -103,7 +103,6 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
                 meta.update(future.result())
                 pb.update(batch_size)
 
-    raise a
     return meta
 
 
