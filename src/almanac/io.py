@@ -159,10 +159,11 @@ def get_hdf5_dtype(pydantic_type, sample_value=None):
         # Handle string length determination
         if dtype == 'S' and sample_value is not None:
             if isinstance(sample_value, (list, tuple, np.ndarray)):
-                max_len = max(len(str(v)) for v in sample_value)
+                max_len = max((len(str(v)) for v in sample_value), default=1)
             else:
                 max_len = len(str(sample_value)) if sample_value else 1
-            return f'S{max_len}'
+            # Guard against 'S0' (all-empty strings), which h5py rejects
+            return f'S{max(max_len, 1)}'
         elif dtype == 'S':
             return 'S100'  # Default string length
 
@@ -388,7 +389,7 @@ def _write_models_to_hdf5_group(
             # Handle variable-length data (like lists)
             if any(isinstance(value, list) for value in converted_data):
                 # Create variable-length dataset
-                dt = h5py.special_dtype(vlen=np.dtype(hdf5_dtype))
+                dt = h5.special_dtype(vlen=np.dtype(hdf5_dtype))
                 dataset = hdf5_group.create_dataset(
                     field_name,
                     (num_records,),
