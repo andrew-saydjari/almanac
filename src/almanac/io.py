@@ -362,7 +362,7 @@ def _write_models_to_hdf5_group(
 
         chunks = (min(chunk_size, num_records),) if chunk_size is not None and num_records > chunk_size else None
         if field_data.ndim > 1 and chunks is not None:
-            chunks = (chunks[0], field_data.shape[-1])
+            chunks = (chunks[0], *field_data.shape[1:])
         compression_setting = compression if chunk_size is not None and num_records > chunk_size else None
 
         if getattr(field_spec, "annotation", None) is np.ndarray:
