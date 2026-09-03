@@ -11,6 +11,8 @@ import click
     type=int,
     help="Modified Julian date to query. Use negative values to indicate relative to current MJD",
 )
+@click.option("--mjds", default=None, type=str,
+              help="Comma-separated explicit MJD list (non-contiguous OK)")
 @click.option("--mjd-start", default=None, type=int, help="Start of MJD range to query")
 @click.option("--mjd-end", default=None, type=int, help="End of MJD range to query")
 @click.option("--date", default=None, type=str, help="Date to query (e.g., 2024-01-15)")
@@ -40,6 +42,7 @@ def main(
     ctx,
     verbosity,
     mjd,
+    mjds,
     mjd_start,
     mjd_end,
     date,
@@ -71,7 +74,7 @@ def main(
     from time import time, sleep
 
     mjds, mjd_min, mjd_max = utils.parse_mjds(
-        mjd, mjd_start, mjd_end, date, date_start, date_end
+        mjd, mjd_start, mjd_end, date, date_start, date_end, mjds=mjds
     )
     observatories = utils.get_observatories(apo, lco)
 
@@ -519,6 +522,8 @@ def _get_sdss_ids(fp, obs, mjd):
     type=int,
     help="Modified Julian date to query. Use negative values to indicate relative to current MJD",
 )
+@click.option("--mjds", default=None, type=str,
+              help="Comma-separated explicit MJD list (non-contiguous OK)")
 @click.option("--mjd-start", default=None, type=int, help="Start of MJD range to query")
 @click.option("--mjd-end", default=None, type=int, help="End of MJD range to query")
 @click.option("--date", default=None, type=str, help="Date to query (e.g., 2024-01-15)")
@@ -542,6 +547,7 @@ def _get_sdss_ids(fp, obs, mjd):
 def metadata(
     input_path,
     mjd,
+    mjds,
     mjd_start,
     mjd_end,
     date,
@@ -568,7 +574,7 @@ def metadata(
 
     observatories = utils.get_observatories(apo, lco)
     mjds, *_ = utils.parse_mjds(
-        mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True
+        mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True, mjds=mjds
     )
     sdss_ids = set()
     with h5.File(input_path, "r") as fp:
