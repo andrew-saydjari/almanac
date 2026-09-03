@@ -128,6 +128,7 @@ def main(
                 import os
                 import signal
                 import concurrent.futures
+                from concurrent.futures.process import BrokenProcessPool
 
                 if processes < 0:
                     processes = os.cpu_count()
@@ -164,7 +165,7 @@ def main(
                                 ) = future.result()
                             except KeyboardInterrupt:
                                 raise
-                            except concurrent.futures.process.BrokenProcessPool:
+                            except BrokenProcessPool:
                                 failed.append(
                                     (observatory, mjd, "process pool broken")
                                 )
@@ -221,7 +222,7 @@ def main(
                                     )
                                 ] = (mjd, observatory)
 
-                    except concurrent.futures.process.BrokenProcessPool as e:
+                    except BrokenProcessPool as e:
                         # The pool cannot recover; mark everything outstanding
                         # as failed but continue so the missing-exposures table
                         # and failure report are still written.
