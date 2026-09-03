@@ -82,7 +82,7 @@ def query_targeting(sdss_ids: List[int], **kwargs):
     yield from q_cartons
 
 
-def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
+def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None, max_workers=None):
     """
     Query the SDSS database for targeting, astrometry, and photometry information.
 
@@ -92,17 +92,26 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
         List of SDSS IDs to query
     batch_size : int, optional
         Number of IDs per batch (default: 10,000)
+    max_workers : int, optional
+        Number of worker processes (default: the `catalog_query_max_workers`
+        configuration setting). Each worker opens its own database connection;
+        keep this low when connecting through a single SSH tunnel.
 
     Yields
     ------
     dict
         Dictionary containing catalog data for each SDSS ID
     """
+    from almanac import config
+
+    if max_workers is None:
+        max_workers = int(getattr(config, "catalog_query_max_workers", 4))
+    max_workers = max(1, min(max_workers, os.cpu_count() or 1))
 
     meta = {}
     tqdm_kwds = tqdm_kwds or {}
     with tqdm(desc="Querying catalog", total=len(sdss_ids), **tqdm_kwds) as pb:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=min(8, os.cpu_count() or 8)) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(_query_catalog, batch, i)
                 for i, batch in enumerate(batched(sorted(sdss_ids), batch_size))
@@ -116,6 +125,22 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
 
 def _query_catalog(sdss_ids: List[int], suffix=""):
     """
+    Query the SDSS database for targeting, astrometry, and photometry
+    information, retrying (with reconnect and backoff) on transient database
+    connection errors.
+
+    Parameters
+    ----------
+    sdss_ids : List[int]
+        List of SDSS IDs to query
+    """
+    from almanac.retry import retry_on_database_error
+
+    return retry_on_database_error(_query_catalog_once)(sdss_ids, suffix=suffix)
+
+
+def _query_catalog_once(sdss_ids: List[int], suffix=""):
+    """
     Query the SDSS database for targeting, astrometry, and photometry information.
 
     Uses a temporary table for efficient querying of large ID lists.
@@ -128,6 +153,9 @@ def _query_catalog(sdss_ids: List[int], suffix=""):
 
     from almanac.database import catalogdb as cdb, targetdb as tdb
 
+    # The temp table may survive a failed earlier attempt if the session is
+    # still alive (a reconnect drops it automatically).
+    cdb.database.execute_sql(f"DROP TABLE IF EXISTS tmp_sdss_ids{suffix}")
     cdb.database.execute_sql(
         f"CREATE TEMP TABLE tmp_sdss_ids{suffix} (sdss_id BIGINT PRIMARY KEY)"
     )
