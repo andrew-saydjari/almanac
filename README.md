@@ -87,6 +87,12 @@ almanac --mjd-start 59300 --mjd-end 59310 # Give me these 10 days
 almanac --date-start 2021-01-01 --date-end 2021-01-31 # Give me all of January 2021
 ```
 
+Or an explicit list of days, which need not be contiguous:
+
+```bash
+almanac --mjds 58011,59337,60000 # Just these three days
+```
+
 ### Fiber mappings
 
 You can also use `almanac` to see the fiber mappings for a given plate (SDSS-IV) or FPS pointing (SDSS-V) by specifing the ``--fibers`` (or ``--fibres``) flag. This will give you the mapping of fibers to targets, and the target properties. 
@@ -120,8 +126,33 @@ An example structure of the HDF5 file is below:
 ```
 raw/apo/59300/exposures        # a data table of exposures
 raw/apo/59300/sequences        # a Nx2 array of exposure numbers (inclusive) that form a sequence
+raw/apo/59300/sequences/missing # exposure numbers expected but not found on disk
 raw/apo/59300/fibers/fps/1     # a data table of fiber mappings for FPS configuration id 1
 raw/apo/59300/fibers/plates/2  # a data table of fiber mappings for plate id 2
+missing_exposures              # run-level table of every missing exposure, with a reason
+                               # (hole, trailing, db_no_file, file_no_db, db_unavailable)
+```
+
+For long runs, ``--skip-existing`` skips observatory/MJD pairs already present in the
+output file, so an interrupted run can simply be re-run:
+
+```bash
+almanac --mjd-start 59300 --mjd-end 60300 -O big.h5 --fibers --skip-existing
+```
+
+Transient database errors are retried with backoff, and a night that fails outright is
+recorded and skipped rather than killing the run (a list of failed nights is printed at
+the end). See ``almanac config show`` for the retry and worker-count knobs.
+
+## Adding catalog metadata
+
+Once you have an output file with fiber mappings, `almanac add metadata` decorates it
+with a `meta/` group of astrometry, photometry, and targeting flags for every matched
+target (queried once per unique `sdss_id`):
+
+```bash
+almanac add metadata /path/to/file.h5
+almanac add metadata /path/to/file.h5 --query-workers 4 # be gentle on remote tunnels
 ```
 
 ## Configuration
