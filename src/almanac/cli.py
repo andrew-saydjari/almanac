@@ -605,17 +605,20 @@ def metadata(
         carton_pks = results[sdss_id].pop("carton_pks", set())
         carton_pks_list.append(list(carton_pks) if carton_pks else [])
 
-    # Initialize targeting flags array
-    flags = TargetingFlags(np.zeros((len(sdss_id_list), 1)))
-    
-    # Set bits for each source based on their carton_pks
+    # Initialize targeting flags array. Guard the empty case: sdss_semaphore's
+    # TargetingFlags indexes array[0] during construction, so zero cross-matched
+    # sources (e.g. plate-era nights with no sdss_id matches) would IndexError.
     unknown_carton_pks = set()
-    for i, carton_pks in enumerate(carton_pks_list):
-        for carton_pk in carton_pks:
-            try:
-                flags.set_bit_by_carton_pk(i, carton_pk)
-            except KeyError:
-                unknown_carton_pks.add(carton_pk)
+    if sdss_id_list:
+        flags = TargetingFlags(np.zeros((len(sdss_id_list), 1)))
+
+        # Set bits for each source based on their carton_pks
+        for i, carton_pks in enumerate(carton_pks_list):
+            for carton_pk in carton_pks:
+                try:
+                    flags.set_bit_by_carton_pk(i, carton_pk)
+                except KeyError:
+                    unknown_carton_pks.add(carton_pk)
 
     # Convert dict of dicts to list of Source models for HDF5 writing
     sources = []
