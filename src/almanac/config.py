@@ -24,6 +24,15 @@ class Config:
     sdssdb: DatabaseConfig = field(default_factory=DatabaseConfig)
     database_connect_time_warning: int = 3  # seconds
 
+    # Retry-with-backoff on transient database connection errors (see retry.py).
+    database_retry_attempts: int = 5
+    database_retry_backoff: float = 2.0  # seconds; doubles per attempt
+
+    # Worker processes for `almanac add metadata` catalog queries. Each worker
+    # opens its own database connection; keep this low when connecting through
+    # a single SSH tunnel.
+    catalog_query_max_workers: int = 4
+
     sdssdb_exposure_min_mjd: ObservatoryMJD = field(default_factory=ObservatoryMJD)
     logging_level: int = 20  # logging.INFO
 
