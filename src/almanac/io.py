@@ -351,6 +351,10 @@ def write_models_to_hdf5_group(
         chunk_size: Chunk size for HDF5 datasets (for performance)
         compression: Compression algorithm ('gzip', 'lzf', 'szip', None)
     """
+    if not models:
+        # Nothing to write (e.g. a night with zero cross-matched sources);
+        # leave the group empty rather than crash on models[0].
+        return
     model_type = type(models[0])
 
     fields = { **model_type.model_fields, **model_type.model_computed_fields }
