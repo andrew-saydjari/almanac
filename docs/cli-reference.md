@@ -28,6 +28,12 @@ Start of MJD range for queries.
 End of MJD range for queries (inclusive).
 - **Example**: `almanac --mjd-start -30 --mjd-end -1`
 
+#### `--mjds <list>`
+Comma-separated list of explicit MJDs to query. The list does not need to be contiguous.
+- Useful for testbeds, reprocessing selected nights, or filling gaps
+- Also accepted by `almanac add metadata`
+- **Example**: `almanac --mjds 58011,59337,60000`
+
 #### `--date <YYYY-MM-DD>`
 Query specific calendar date (UTC).
 - **Format**: ISO date format (YYYY-MM-DD)
@@ -70,6 +76,13 @@ Write output to HDF5 file at specified path.
 - **Incremental**: Appends to existing files, preserves existing data
 - **Example**: `almanac --output results.h5 --mjd-start -30`
 
+#### `--skip-existing`
+Skip observatory/MJD pairs that already exist in the output file (resume mode).
+- Requires `--output`; pairs with an existing `raw/{observatory}/{mjd}/exposures` group are skipped
+- An interrupted or partially failed run can simply be re-run with the same command: only the missing pairs are processed
+- Existing `/missing_exposures` entries for skipped pairs are preserved
+- **Example**: `almanac --mjd-start 59300 --mjd-end 60300 --output big.h5 --skip-existing`
+
 #### `-v`, `--verbosity`
 Control output verbosity (stackable).
 - No flag: Minimal output
@@ -84,6 +97,31 @@ Number of parallel processes for data processing.
 - **Default**: Automatic based on available CPU cores
 - **Example**: `almanac --processes 4 --mjd-start -30`
 
+### Fault Tolerance
+
+Long queries are fault-isolated per observatory/MJD pair:
+
+- **Retry with backoff**: Transient database connection errors are retried automatically (see the `database_retry_attempts` and `database_retry_backoff` [configuration settings](configuration.md))
+- **Per-night isolation**: A night that fails outright is recorded and skipped rather than aborting the whole run; failed pairs are listed at the end
+- **Resume**: Re-run the same command with `--skip-existing` to retry only the failed pairs
+- **Missing-exposure report**: Every detected missing exposure is recorded in the `/missing_exposures` table of the output file with a reason code (see [Data Formats](data-formats.md))
+
+## Metadata Commands
+
+### `almanac add metadata <file>`
+Decorate an existing almanac HDF5 file (created with `--fibers`) with astrometry, photometry, and targeting flags for every cross-matched target. Results are written to a `meta/` group in the same file, queried once per unique `sdss_id`.
+
+```bash
+almanac add metadata results.h5
+almanac add metadata results.h5 --mjds 58011,59337 --apo
+almanac add metadata results.h5 --query-workers 4
+```
+
+**Options**:
+- Date/MJD selection: `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, `--date`, `--date-start`/`--date-end` (defaults to every MJD present in the file)
+- Observatory selection: `--apo`, `--lco`
+- `--p <integer>`: Number of workers used to read `sdss_id` values from the file
+- `--query-workers <integer>`: Number of parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection; keep this low when connecting through a single SSH tunnel.
 
 ## Configuration Commands
 
@@ -209,6 +247,23 @@ almanac --date-start 2024-01-01 --date-end 2024-03-31 \\
 
 # Export recent observations
 almanac --mjd-start -30 --output exposures.h5
+
+# Non-contiguous set of nights
+almanac --mjds 58011,59337,60000 --fibers --output testbed.h5
+```
+
+### Resumable Bulk Generation
+
+```bash
+# Large multi-year run; safe to interrupt and re-run
+almanac --mjd-start 59300 --mjd-end 60300 --fibers \
+        --output survey.h5 --skip-existing -v
+
+# Then decorate with catalog metadata
+almanac add metadata survey.h5 --query-workers 4
+
+# Review what was missing before downstream processing
+# (see the /missing_exposures table in survey.h5)
 ```
 
 ### Troubleshooting
@@ -241,7 +296,7 @@ For bash completion support, consider adding alias:
 ```bash
 # Add to ~/.bashrc or ~/.bash_profile  
 alias almanac='almanac'
-complete -W '--mjd --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --output --processes --verbosity --help' almanac
+complete -W '--mjd --mjds --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --output --skip-existing --processes --verbosity --help' almanac
 ```
 
 ## Tips

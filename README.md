@@ -125,10 +125,10 @@ An example structure of the HDF5 file is below:
 
 ```
 raw/apo/59300/exposures        # a data table of exposures
-raw/apo/59300/sequences        # a Nx2 array of exposure numbers (inclusive) that form a sequence
-raw/apo/59300/sequences/missing # exposure numbers expected but not found on disk
-raw/apo/59300/fibers/fps/1     # a data table of fiber mappings for FPS configuration id 1
-raw/apo/59300/fibers/plates/2  # a data table of fiber mappings for plate id 2
+raw/apo/59300/sequences        # per image type, a Nx2 array of exposure numbers (inclusive) that form a sequence
+raw/apo/59300/sequences/missing # Nx2 ranges of exposure numbers expected but not found on disk
+raw/apo/59300/fibers/1         # a data table of fiber mappings, keyed by FPS
+                               # configuration id (or plate id in the plate era)
 missing_exposures              # run-level table of every missing exposure, with a reason
                                # (hole, trailing, db_no_file, file_no_db, db_unavailable)
 ```

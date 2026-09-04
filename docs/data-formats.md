@@ -313,13 +313,44 @@ When saving data, `almanac` organizes the Pydantic model data into HDF5 format:
 
 ```
 filename.h5
-├── {observatory}/           # Observatory (apo/lco)
-│   └── {mjd}/              # Modified Julian Date
-│       ├── exposures       # Exposure model data
-│       └── targets/        # Target model data
-│           ├── fps/        # FPSTarget data by config_id
-│           └── plates/     # PlateTarget data by plate_id
+├── raw/
+│   └── {observatory}/               # Observatory (apo/lco)
+│       └── {mjd}/                   # Modified Julian Date
+│           ├── exposures            # Exposure model data
+│           ├── sequences/           # Per image type: Nx2 array of exposure
+│           │   └── {image_type}     #   numbers (inclusive) forming a sequence
+│           └── fibers/              # Target model data (with --fibers)
+│               └── {id}             # FPSTarget data by config_id, or
+│                                    #   PlateTarget data by plate_id
+├── missing_exposures/               # Run-level missing-exposures report
+└── meta/                            # Astrometry, photometry, and targeting
+                                     #   flags (from `almanac add metadata`),
+                                     #   one row per unique sdss_id
 ```
+
+### Missing-Exposures Report
+
+The run-level `/missing_exposures` group records every exposure that was expected but not found, comparing the exposures on disk against the exposure numbers known to the operations database. It contains parallel datasets:
+
+| Dataset | Type | Description |
+|---------|------|-------------|
+| `observatory` | string | Observatory ("apo" or "lco") |
+| `mjd` | integer | Modified Julian Date |
+| `exposure` | integer | Missing exposure number (`-1` for the `db_unavailable` sentinel) |
+| `expected_max_db` | integer | Highest exposure number known to the database for that night |
+| `reason` | string | Reason code (see below) |
+
+**Reason codes**:
+
+| Reason | Description |
+|--------|-------------|
+| `hole` | No file on disk and no database record; interior gap in the on-disk exposure numbers |
+| `trailing` | No file on disk and no database record; beyond the last on-disk exposure but at or below the database maximum |
+| `db_no_file` | The operations database has a record of this exposure, but no file exists on disk |
+| `file_no_db` | A file exists on disk, but the operations database has no record of it |
+| `db_unavailable` | Sentinel (`exposure = -1`) recording that the database could not be reached for this night, so trailing missing exposures are undetectable |
+
+Entries are refreshed per observatory/MJD pair on each run; pairs skipped via `--skip-existing` keep their previous entries. Exposures identified as missing on disk also appear in `raw/{observatory}/{mjd}/exposures` with `image_type="missing"` so that exposure numbering stays dense.
 
 ### Data Access
 

@@ -176,15 +176,27 @@ almanac --mjd -1 --output results.h5
 almanac --mjd -2 --output results.h5  # Adds to same file
 ```
 
+### Q: How do I resume an interrupted query?
+
+**A:** Re-run the same command with `--skip-existing`:
+
+```bash
+almanac --mjd-start 59300 --mjd-end 60300 --output big.h5 --fibers --skip-existing
+```
+
+Observatory/MJD pairs already present in the output file are skipped, so only missing (or previously failed) nights are processed. Nights that fail are recorded and listed at the end of the run instead of aborting it, so a re-run with `--skip-existing` retries exactly the failed pairs.
+
 ## Data Interpretation
 
 ### Q: What does "missing exposures" mean?
 
-**A:** `almanac` detects gaps in exposure sequences. This could indicate:
+**A:** `almanac` detects gaps in exposure sequences by comparing the files on disk against the exposure numbers known to the operations database. This could indicate:
 - **Technical issues**: Instrument problems during observations
 - **Weather**: Observations stopped due to poor conditions  
 - **Scheduled breaks**: Intentional gaps in observing
 - **Data processing**: Exposures not yet processed or archived
+
+When writing to an output file, every missing exposure is recorded in the run-level `/missing_exposures` table with a reason code (`hole`, `trailing`, `db_no_file`, `file_no_db`, or `db_unavailable`) so you can audit a run before downstream processing. See [Data Formats](data-formats.md) for the schema and reason-code definitions.
 
 ### Q: What are "sequences"?
 

@@ -56,6 +56,11 @@ almanac --date-start 2021-01-01 --date-end 2021-01-31  # January 2021
 almanac --date-start 2021-01-01 --date-end 2021-12-31  # All of 2021
 ```
 
+**Explicit MJD Lists** (need not be contiguous):
+```bash
+almanac --mjds 58011,59337,60000    # Just these three nights
+```
+
 ## Fiber Mapping Analysis
 
 ### Basic Fiber Information
@@ -101,6 +106,32 @@ almanac -O monthly.h5 --date-start 2024-01-01 --date-end 2024-01-31
 ```
 
 **Incremental Updates**: Running `almanac` multiple times with the same output file appends new data while preserving existing entries.
+
+### Resuming Long Runs
+
+For large queries, add `--skip-existing` so that observatory/MJD pairs already present in the output file are skipped:
+
+```bash
+almanac --mjd-start 59300 --mjd-end 60300 --fibers \
+        --output survey.h5 --skip-existing
+```
+
+If the run is interrupted or some nights fail, simply re-run the same command: only the missing pairs are processed. Transient database errors are retried automatically with backoff, and a night that fails outright is recorded and skipped rather than aborting the run (failed pairs are listed at the end). See the [Configuration Guide](configuration.md) for the retry knobs.
+
+### Missing-Exposure Reporting
+
+Every detected missing exposure is recorded in a run-level `/missing_exposures` table in the output file, with a reason code distinguishing gaps on disk, database/disk mismatches, and database outages. Review this table before downstream processing; see [Data Formats](data-formats.md) for the schema and reason codes.
+
+## Adding Catalog Metadata
+
+Once you have an output file with fiber mappings, `almanac add metadata` decorates it with a `meta/` group containing astrometry, photometry, and targeting flags for every cross-matched target (queried once per unique `sdss_id`):
+
+```bash
+almanac add metadata survey.h5
+almanac add metadata survey.h5 --query-workers 4   # be gentle on remote tunnels
+```
+
+By default all MJDs in the file are processed; restrict with `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, or `--apo`/`--lco`.
 
 ## Advanced Features
 
