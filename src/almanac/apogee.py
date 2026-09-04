@@ -30,6 +30,33 @@ def _execute_query(q) -> List[Tuple]:
 
     return _fetch()
 
+
+def set_apogee_id_lookup(lookup: Dict[str, int]) -> None:
+    """
+    Install a pre-built APOGEE ID -> SDSS ID lookup for this process.
+
+    The lookup is built by `create_apogee_id_lookup` from a heavy database
+    query (~10 s, ~1.3M entries, ~33 MB pickled) and is only needed for
+    plate-era "coordinate" target identifiers. When running with a process
+    pool, the parent builds it once and installs it in each worker via the
+    pool initializer, instead of every worker independently re-querying the
+    database. Any process without an installed lookup falls back to building
+    its own on first use.
+    """
+    global APOGEE_ID_LOOKUP
+    APOGEE_ID_LOOKUP = lookup
+
+
+def any_plate_era(tasks) -> bool:
+    """
+    Whether any (mjd, observatory) task is from the plate era (i.e. could
+    need the APOGEE ID lookup for target cross-matching).
+    """
+    from almanac.data_models.exposure import FPS_ERA_START_MJD
+
+    return any(mjd < FPS_ERA_START_MJD[observatory] for mjd, observatory in tasks)
+
+
 def create_apogee_id_lookup() -> Dict[str, int]:
     """
     Create a lookup dictionary mapping APOGEE IDs to SDSS IDs.

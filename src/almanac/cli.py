@@ -3,6 +3,28 @@
 import click
 
 
+def _pool_initializer(apogee_id_lookup=None):
+    """
+    Initialize a process-pool worker.
+
+    Resets any database connection state inherited from the parent (each
+    worker must open its own connection), and installs the parent-built
+    APOGEE ID -> SDSS ID lookup, if one was provided, so that workers do not
+    each re-run the heavy query that builds it.
+    """
+    from sdssdb.peewee.sdss5db import database
+
+    if hasattr(database, "_state"):
+        database._state.closed = True
+        database._state.conn = None
+    from almanac.database import database
+
+    if apogee_id_lookup is not None:
+        from almanac import apogee
+
+        apogee.set_apogee_id_lookup(apogee_id_lookup)
+
+
 @click.group(invoke_without_command=True)
 @click.option("-v", "--verbosity", count=True, help="Verbosity level")
 @click.option(
@@ -144,14 +166,6 @@ def main(
         with context_manager as live:
             if processes is not None:
 
-                def initializer():
-                    from sdssdb.peewee.sdss5db import database
-
-                    if hasattr(database, "_state"):
-                        database._state.closed = True
-                        database._state.conn = None
-                    from almanac.database import database
-
                 # Parallel
                 import os
                 import signal
@@ -160,8 +174,25 @@ def main(
 
                 if processes < 0:
                     processes = os.cpu_count()
+
+                initargs = ()
+                if fibers and not no_x_match and apogee.any_plate_era(tasks):
+                    # Plate-era target cross-matching needs a large APOGEE ID
+                    # -> SDSS ID lookup built from a heavy database query
+                    # (~10 s, ~33 MB pickled). Build it ONCE here and ship it
+                    # to every worker through the pool initializer (free via
+                    # copy-on-write under fork), instead of each worker
+                    # independently re-querying the database on first use.
+                    logger.info(
+                        "Building APOGEE ID lookup in parent "
+                        "(plate-era nights present)"
+                    )
+                    initargs = (apogee.create_apogee_id_lookup(),)
+
                 with concurrent.futures.ProcessPoolExecutor(
-                    max_workers=processes, initializer=initializer
+                    max_workers=processes,
+                    initializer=_pool_initializer,
+                    initargs=initargs,
                 ) as pool:
 
                     task_iter = iter(tasks)
