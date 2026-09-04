@@ -70,6 +70,7 @@ def main(
     from rich.live import Live
     from almanac.display import ObservationsDisplay, display_exposures
     from almanac import apogee, logger, io, utils
+    from almanac.writer import QueueWriter
     from contextlib import nullcontext
     from time import time, sleep
 
@@ -115,6 +116,30 @@ def main(
                     f"present in {output}"
                 )
             tasks = kept
+
+        # All HDF5 writes during the run go through a dedicated writer thread
+        # with a bounded queue, so the loop below can keep collecting worker
+        # results while the previous night is being written. h5py is not
+        # thread-safe: `fp` must not be touched by this thread until the
+        # writer is closed (the skip-existing reads above happen before the
+        # writer starts; the missing-exposures table is written after it is
+        # drained and closed).
+        writer = None
+        if output:
+
+            def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
+                io.update(fp, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
+
+            def _on_write_error(item, exception):
+                observatory_w, mjd_w = item[:2]
+                logger.error(f"Failed to write {observatory_w}/{mjd_w}: {exception}")
+                failed.append((observatory_w, mjd_w, f"write failed: {exception}"))
+
+            writer = QueueWriter(
+                _write_night,
+                maxsize=max(4, 2 * (processes or 1)),
+                on_error=_on_write_error,
+            ).start()
 
         with context_manager as live:
             if processes is not None:
@@ -193,14 +218,12 @@ def main(
                                 else:
                                     display.completed[observatory].add(v)
                                     results.append(result)
-                                    if output:
-                                        io.update(
-                                            fp,
+                                    if writer is not None:
+                                        writer.submit(
                                             observatory,
                                             mjd,
                                             exposures,
                                             sequences,
-                                            **io_kwds,
                                         )
 
                             if (
@@ -238,6 +261,10 @@ def main(
                         for pid in pool._processes:
                             os.kill(pid, signal.SIGKILL)
                         pool.shutdown(wait=False, cancel_futures=True)
+                        if writer is not None:
+                            # Let any in-flight write finish (so the file is
+                            # not truncated mid-write), drop queued nights.
+                            writer.close(drain=False)
                         try:
                             fp.close()
                         except:
@@ -254,6 +281,8 @@ def main(
                             observatory, mjd, fibers, not no_x_match
                         )
                     except KeyboardInterrupt:
+                        if writer is not None:
+                            writer.close(drain=False)
                         raise
                     except Exception as e:
                         # Per-MJD fault isolation: record and continue.
@@ -273,14 +302,12 @@ def main(
                         else:
                             display.completed[observatory].add(v)
                             results.append(result)
-                            if output:
-                                io.update(
-                                    fp,
+                            if writer is not None:
+                                writer.submit(
                                     observatory,
                                     mjd,
                                     exposures,
                                     sequences,
-                                    **io_kwds,
                                 )
 
                     if live is not None and (time() - t) > 1 / refresh_per_second:
@@ -291,6 +318,11 @@ def main(
                 live.update(display.create_display())
                 if verbosity <= 1 and output is None:
                     sleep(3)
+
+        if writer is not None:
+            # Drain all queued nights and stop the writer thread before this
+            # thread touches `fp` again.
+            writer.close(drain=True)
 
         if output:
             # Run-level missing-exposures table. Entries from previous runs
