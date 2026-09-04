@@ -70,6 +70,22 @@ almanac config set sdssdb.port 5432
 - **Units**: Seconds
 - **Description**: Time threshold for database connection warnings
 
+#### `database_retry_attempts`
+- **Type**: Integer
+- **Default**: `5`
+- **Description**: Number of attempts for transient database connection errors before a query is treated as failed
+
+#### `database_retry_backoff`
+- **Type**: Float
+- **Default**: `2.0`
+- **Units**: Seconds
+- **Description**: Initial delay between database retries; the delay doubles with each attempt
+
+#### `catalog_query_max_workers`
+- **Type**: Integer
+- **Default**: `4`
+- **Description**: Number of parallel database query workers used by `almanac add metadata`. Each worker opens its own database connection, so keep this low when connecting through a single SSH tunnel. Can be overridden per run with `--query-workers`.
+
 ### Data Processing Settings
 
 #### `sdssdb_exposure_min_mjd.apo`
@@ -102,6 +118,9 @@ The configuration file uses YAML format:
 ```yaml
 # Example almanac configuration
 database_connect_time_warning: 3
+database_retry_attempts: 5
+database_retry_backoff: 2.0
+catalog_query_max_workers: 4
 logging_level: 20
 
 sdssdb:
