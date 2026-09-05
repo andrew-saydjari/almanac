@@ -86,13 +86,20 @@ def update(
         fibers_group = get_or_create_group(fp, f"raw/{observatory}/{mjd}/fibers")
         done = set()
         for exposure in exposures:
-            if not exposure.targets:
-                continue
-
             reference_id_string = str(
                 exposure.config_id if exposure.fps else exposure.plate_id
             )
             if reference_id_string in done:
+                # Check `done` BEFORE touching `exposure.targets`: `targets`
+                # is a lazy property, and for exposures whose configuration
+                # has already been written, accessing it would re-parse the
+                # confSummary/plugmap yanny files only to discard the result.
+                # Workers pre-compute (and pickle) targets for the exposures
+                # that are actually written, so this ordering keeps the
+                # parent process from redoing ~seconds of parsing per night.
+                continue
+
+            if not exposure.targets:
                 continue
 
             delete_hdf5_entry(fibers_group, reference_id_string)
