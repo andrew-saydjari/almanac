@@ -162,7 +162,11 @@ almanac add fibers /path/to/file.h5 -p 8                # use 8 processes
 
 Once you have an output file with fiber mappings, `almanac add metadata` decorates it
 with a `meta/` group of astrometry, photometry, and targeting flags for every matched
-target (queried once per unique `sdss_id`):
+target (queried once per unique `sdss_id`). Alongside the catalog cross-matches, Gaia DR3,
+and 2MASS columns this includes the SDSS_ID position (with Galactic coordinates and a
+HEALPix index), unWISE and GLIMPSE photometry, Bailer-Jones et al. (2021) distances,
+Gaia DR3 synthetic photometry, Zhang, Green & Rix (2023) stellar parameters, and the
+SDSS-IV APOGEE (DR17) targeting bitmasks:
 
 ```bash
 almanac add metadata /path/to/file.h5
