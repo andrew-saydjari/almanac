@@ -144,16 +144,37 @@ Transient database errors are retried with backoff, and a night that fails outri
 recorded and skipped rather than killing the run (a list of failed nights is printed at
 the end). See ``almanac config show`` for the retry and worker-count knobs.
 
+## Adding fiber mappings to an existing file
+
+If you created an output file without ``--fibers``, you can add the fiber mappings
+afterwards with `almanac add fibers`. It uses the exposures already in the file to find
+the confSummary (FPS era) or plugmap (plate era) files, so the raw exposure headers are
+not read again:
+
+```bash
+almanac add fibers /path/to/file.h5
+almanac add fibers /path/to/file.h5 --mjd 60000 --apo   # just one night
+almanac add fibers /path/to/file.h5 --no-x-match        # skip the SDSS ID cross-match
+almanac add fibers /path/to/file.h5 -p 8                # use 8 processes
+```
+
 ## Adding catalog metadata
 
 Once you have an output file with fiber mappings, `almanac add metadata` decorates it
 with a `meta/` group of astrometry, photometry, and targeting flags for every matched
-target (queried once per unique `sdss_id`):
+target (queried once per unique `sdss_id`). Alongside the catalog cross-matches, Gaia DR3,
+and 2MASS columns this includes the SDSS_ID position (with Galactic coordinates and a
+HEALPix index), unWISE and GLIMPSE photometry, Bailer-Jones et al. (2021) distances,
+Gaia DR3 synthetic photometry, Zhang, Green & Rix (2023) stellar parameters, and the
+SDSS-IV APOGEE (DR17) targeting bitmasks:
 
 ```bash
 almanac add metadata /path/to/file.h5
 almanac add metadata /path/to/file.h5 --query-workers 4 # be gentle on remote tunnels
 ```
+
+If the file has no fiber mappings, `almanac add metadata` warns and exits without
+writing anything: run `almanac add fibers` first.
 
 ## Configuration
 
