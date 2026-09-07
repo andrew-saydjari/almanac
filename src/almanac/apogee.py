@@ -16,6 +16,47 @@ from almanac.data_models.utils import mjd_to_exposure_prefix, get_exposure_path
 
 APOGEE_ID_LOOKUP = None
 
+
+def _execute_query(q) -> List[Tuple]:
+    """
+    Execute a peewee query and return all rows, retrying (with reconnect and
+    backoff) on transient database connection errors.
+    """
+    from almanac.retry import retry_on_database_error
+
+    @retry_on_database_error
+    def _fetch():
+        return list(q)
+
+    return _fetch()
+
+
+def set_apogee_id_lookup(lookup: Dict[str, int]) -> None:
+    """
+    Install a pre-built APOGEE ID -> SDSS ID lookup for this process.
+
+    The lookup is built by `create_apogee_id_lookup` from a heavy database
+    query (~10 s, ~1.3M entries, ~33 MB pickled) and is only needed for
+    plate-era "coordinate" target identifiers. When running with a process
+    pool, the parent builds it once and installs it in each worker via the
+    pool initializer, instead of every worker independently re-querying the
+    database. Any process without an installed lookup falls back to building
+    its own on first use.
+    """
+    global APOGEE_ID_LOOKUP
+    APOGEE_ID_LOOKUP = lookup
+
+
+def any_plate_era(tasks) -> bool:
+    """
+    Whether any (mjd, observatory) task is from the plate era (i.e. could
+    need the APOGEE ID lookup for target cross-matching).
+    """
+    from almanac.data_models.exposure import FPS_ERA_START_MJD
+
+    return any(mjd < FPS_ERA_START_MJD[observatory] for mjd, observatory in tasks)
+
+
 def create_apogee_id_lookup() -> Dict[str, int]:
     """
     Create a lookup dictionary mapping APOGEE IDs to SDSS IDs.
@@ -90,7 +131,7 @@ def create_apogee_id_lookup() -> Dict[str, int]:
         .tuples()
     )
     APOGEE_ID_LOOKUP = {}
-    for sdss_id, apogee_id in q.iterator():
+    for sdss_id, apogee_id in _execute_query(q):
         if len(apogee_id.strip()) <= 2:
             # There is one problematic entry of "AP" which caused 180,000
             # fiber-exposures to be assigned to sdss_id 57991461
@@ -145,21 +186,69 @@ def get_exposures(observatory: str, mjd: int) -> Generator[Exposure, None, None]
     :yields:
         Exposure instances for each unique exposure found on disk.
     """
-    paths = glob(get_exposure_path(observatory, mjd, "a?R", "*", "*"))
-    return organize_exposures(map(Exposure.from_path, get_unique_exposure_paths(paths)))
+    exposures, _ = get_exposures_and_missing(observatory, mjd)
+    return exposures
 
 
-def get_expected_number_of_exposures(observatory: str, mjd: int) -> int:
+def get_exposures_and_missing(
+    observatory: str, mjd: int
+) -> Tuple[List[Exposure], List[Dict[str, Any]]]:
     """
-    Query the SDSS database to get the expected exposures for a given observatory and MJD.
-    This is useful for identifying missing exposures.
+    Like `get_exposures`, but also return the missing-exposures report for this
+    observatory and MJD (see `classify_missing_exposures`).
+
+    :param observatory:
+        The observatory name (e.g. "apo").
+    :param mjd:
+        The Modified Julian Date.
+
+    :returns:
+        A two-tuple of (`exposures`, `missing`), where `missing` is a list of
+        missing-exposure records (dicts).
+    """
+    paths = glob(get_exposure_path(observatory, mjd, "a?R", "*", "*"))
+    disk_exposures = list(map(Exposure.from_path, get_unique_exposure_paths(paths)))
+
+    expected_exposure_numbers, db_status = get_expected_exposure_numbers(observatory, mjd)
+    n_expected = max(expected_exposure_numbers) if expected_exposure_numbers else -1
+
+    exposures = organize_exposures(disk_exposures, n_expected=n_expected)
+    missing = classify_missing_exposures(
+        observatory, mjd, exposures, expected_exposure_numbers, db_status
+    )
+    return exposures, missing
+
+
+def get_expected_exposure_numbers(
+    observatory: str, mjd: int
+) -> Tuple[Optional[List[int]], str]:
+    """
+    Query the SDSS database for the full list of exposure numbers expected for
+    a given observatory and MJD. This is used to identify missing exposures,
+    and to distinguish between different kinds of missing-ness (see
+    `classify_missing_exposures`).
+
+    :param observatory:
+        The observatory name (e.g. "apo").
+    :param mjd:
+        The Modified Julian Date.
+
+    :returns:
+        A two-tuple of (`exposure_numbers`, `status`):
+
+        - `exposure_numbers`: sorted list of within-night exposure numbers
+          (1-indexed) known to the operations database, or `None` if the
+          database was not (or could not be) queried. An empty list means the
+          query succeeded but the database has no rows for this night.
+        - `status`: one of "ok" (query succeeded), "not_queried" (MJD predates
+          database coverage), or "unavailable" (query failed after retries).
     """
 
     if mjd < int(getattr(config.sdssdb_exposure_min_mjd, observatory)):
-        return -1
+        return None, "not_queried"
 
     from almanac.database import opsdb
-    from peewee import fn
+    from almanac.retry import retry_on_database_error
 
     for model in (opsdb.Exposure, opsdb.ExposureFlavor):
         model._meta.schema = f"opsdb_{observatory}"
@@ -168,7 +257,7 @@ def get_expected_number_of_exposures(observatory: str, mjd: int) -> int:
 
     q = (
         opsdb.Exposure.select(
-            fn.max(opsdb.Exposure.exposure_no)
+            opsdb.Exposure.exposure_no
         )
         .where(
             (opsdb.Exposure.exposure_no > start)
@@ -178,20 +267,51 @@ def get_expected_number_of_exposures(observatory: str, mjd: int) -> int:
             opsdb.ExposureFlavor,
             on=(opsdb.ExposureFlavor.pk == opsdb.Exposure.exposure_flavor),
         )
+        .tuples()
     )
+
+    @retry_on_database_error
+    def _fetch():
+        return sorted(int(exposure_no) - start for (exposure_no, ) in q)
+
     try:
-        return q.scalar() - start
-    except:
-        return -1
+        return _fetch(), "ok"
+    except Exception as e:
+        logger.warning(
+            f"Could not query expected exposures for {observatory}/{mjd} "
+            f"(database unavailable?): {e}"
+        )
+        return None, "unavailable"
 
 
-def organize_exposures(exposures: List[Exposure]) -> List[Exposure]:
+def get_expected_number_of_exposures(observatory: str, mjd: int) -> int:
+    """
+    Query the SDSS database to get the expected number of exposures for a given
+    observatory and MJD. Returns -1 when the database has no answer (predates
+    coverage, no rows, or unavailable).
+
+    Kept for backwards compatibility; prefer `get_expected_exposure_numbers`,
+    which distinguishes those cases and returns the full exposure number list.
+    """
+    exposure_numbers, _ = get_expected_exposure_numbers(observatory, mjd)
+    return max(exposure_numbers) if exposure_numbers else -1
+
+
+def organize_exposures(
+    exposures: List[Exposure],
+    n_expected: Optional[int] = None
+) -> List[Exposure]:
     """
     Identify any missing exposures (based on non-contiguous exposure numbers)
-    and fill them with missing image types.
+    and fill them with missing image types, guaranteeing dense 1..N exposure
+    rows.
 
     :param exposures:
         A list of `Exposure` instances.
+
+    :param n_expected: [optional]
+        The maximum within-night exposure number expected from the operations
+        database (-1 if unknown). If `None`, the database is queried.
 
     :returns:
         A list of organized `Exposure` instances.
@@ -204,7 +324,8 @@ def organize_exposures(exposures: List[Exposure]) -> List[Exposure]:
 
     observatory, mjd = (exposures[0].observatory, exposures[0].mjd)
 
-    n_expected = get_expected_number_of_exposures(observatory, mjd)
+    if n_expected is None:
+        n_expected = get_expected_number_of_exposures(observatory, mjd)
     max_exposure = max(exposures[-1].exposure, n_expected)
 
     organized = []
@@ -221,6 +342,103 @@ def organize_exposures(exposures: List[Exposure]) -> List[Exposure]:
                 )
             )
     return organized
+
+
+# Reason codes for the missing-exposures report:
+#   hole           - no file on disk and no database record; interior gap in
+#                    the on-disk exposure numbering
+#   trailing       - no file on disk and no database record; beyond the last
+#                    on-disk exposure but within the database-expected range
+#   db_no_file     - the operations database has a record of this exposure,
+#                    but no file exists on disk
+#   file_no_db     - a file exists on disk, but the operations database has no
+#                    record of this exposure
+#   db_unavailable - sentinel (exposure = -1) recording that the database
+#                    could not be queried for this observatory/MJD, so
+#                    trailing missing exposures are undetectable
+MISSING_EXPOSURE_REASONS = (
+    "hole", "trailing", "db_unavailable", "db_no_file", "file_no_db"
+)
+
+
+def classify_missing_exposures(
+    observatory: str,
+    mjd: int,
+    exposures: List[Exposure],
+    expected_exposure_numbers: Optional[List[int]],
+    db_status: str,
+) -> List[Dict[str, Any]]:
+    """
+    Build the missing-exposures report for one observatory and MJD by comparing
+    the organized exposure list (dense 1..N, holes filled with
+    `image_type="missing"`) against the exposure numbers known to the
+    operations database.
+
+    :param observatory:
+        The observatory name (e.g. "apo").
+    :param mjd:
+        The Modified Julian Date.
+    :param exposures:
+        Organized list of `Exposure` instances (from `organize_exposures`).
+    :param expected_exposure_numbers:
+        Sorted within-night exposure numbers known to the operations database,
+        or `None` (see `get_expected_exposure_numbers`).
+    :param db_status:
+        Status string from `get_expected_exposure_numbers`.
+
+    :returns:
+        A list of records (dicts) with keys: observatory, mjd, exposure,
+        expected_max_db, reason. Reasons are described in
+        `MISSING_EXPOSURE_REASONS`.
+    """
+    expected_max_db = (
+        max(expected_exposure_numbers) if expected_exposure_numbers else -1
+    )
+    expected_set = set(expected_exposure_numbers or [])
+    on_disk = [e.exposure for e in exposures if e.image_type != "missing"]
+    max_on_disk = max(on_disk, default=0)
+
+    records = []
+
+    def add(exposure, reason):
+        records.append(
+            dict(
+                observatory=observatory,
+                mjd=mjd,
+                exposure=exposure,
+                expected_max_db=expected_max_db,
+                reason=reason,
+            )
+        )
+
+    if db_status == "unavailable":
+        # Only disk-detectable holes can be reported; trailing missing
+        # exposures are undetectable. Record a sentinel row so the failure to
+        # check is loud rather than silent.
+        for e in exposures:
+            if e.image_type == "missing":
+                add(e.exposure, "hole")
+        add(-1, "db_unavailable")
+        return records
+
+    for e in exposures:
+        if e.image_type == "missing":
+            if db_status == "ok" and e.exposure in expected_set:
+                add(e.exposure, "db_no_file")
+            elif e.exposure < max_on_disk:
+                add(e.exposure, "hole")
+            else:
+                add(e.exposure, "trailing")
+        elif db_status == "ok" and e.exposure not in expected_set:
+            add(e.exposure, "file_no_db")
+
+    if not exposures and expected_set:
+        # The database expects exposures but nothing is on disk at all.
+        # (`organize_exposures` returns [] in this case, so record them here.)
+        for exposure in sorted(expected_set):
+            add(exposure, "db_no_file")
+
+    return records
 
 
 def get_sequences(
@@ -334,15 +552,15 @@ def get_almanac_data(
         - observatory name
         - MJD
         - A list of exposures
-        - Table of exposure data
-        - dictionary of sequence indices
-        - dictionary of fiber mappings
+        - dictionary of sequence indices (including "missing" exposure ranges)
+        - list of missing-exposure records (see `classify_missing_exposures`)
     """
 
-    exposures = get_exposures(observatory, mjd)
+    exposures, missing = get_exposures_and_missing(observatory, mjd)
     sequences = {
         "objects": get_science_sequences(exposures),
         "arclamps": get_arclamp_sequences(exposures),
+        "missing": get_sequences(exposures, "missing", ()),
     }
     if fibers:
         identifiers = {}
@@ -373,7 +591,7 @@ def get_almanac_data(
                     .tuples()
                 )
                 lookup["catalogid"] = {}
-                for sdss_id, catalogid in q:
+                for sdss_id, catalogid in _execute_query(q):
                     lookup["catalogid"][catalogid] = sdss_id
 
             if "gaia_dr2" in identifiers and is_database_available:
@@ -396,7 +614,7 @@ def get_almanac_data(
                     .tuples()
                 )
                 lookup["gaia_dr2"] = {}
-                for sdss_id, gaia_dr2_source_id in q:
+                for sdss_id, gaia_dr2_source_id in _execute_query(q):
                     lookup["gaia_dr2"][gaia_dr2_source_id] = sdss_id
 
 
@@ -436,7 +654,7 @@ def get_almanac_data(
                         )
                         .tuples()
                     )
-                    lookup["twomass_psc"] = { d: s for d, s in q }
+                    lookup["twomass_psc"] = { d: s for d, s in _execute_query(q) }
 
             # Add sdss_id to targets
             for si, ei in sequences["objects"]:
@@ -460,4 +678,4 @@ def get_almanac_data(
                         #if target.sdss_id == -1 and (target.category not in ("sky_apogee", "unplugged")):
                         #    print(f"{observatory} {mjd} Exposure {exposure.exposure}: Could not find SDSS ID for target {identifier} ({key}) {target}")
 
-    return (observatory, mjd, exposures, sequences)
+    return (observatory, mjd, exposures, sequences, missing)

@@ -72,20 +72,34 @@ def update(
         delete_hdf5_entry(group, "sequences")
         sequences_group = group.create_group("sequences")
         for image_type, entries in sequences.items():
-            sequences_group.create_dataset(image_type, data=np.array(entries))
+            # Guard empty sequences: an empty np.array() defaults to float64
+            # with shape (0,); all sequences are (start, end) integer pairs.
+            data = (
+                np.array(entries, dtype=np.int64)
+                if len(entries) else
+                np.zeros((0, 2), dtype=np.int64)
+            )
+            sequences_group.create_dataset(image_type, data=data)
             _print(f"\traw/{observatory}/{mjd}/sequences/{image_type}")
 
     if fibers:
         fibers_group = get_or_create_group(fp, f"raw/{observatory}/{mjd}/fibers")
         done = set()
         for exposure in exposures:
-            if not exposure.targets:
-                continue
-
             reference_id_string = str(
                 exposure.config_id if exposure.fps else exposure.plate_id
             )
             if reference_id_string in done:
+                # Check `done` BEFORE touching `exposure.targets`: `targets`
+                # is a lazy property, and for exposures whose configuration
+                # has already been written, accessing it would re-parse the
+                # confSummary/plugmap yanny files only to discard the result.
+                # Workers pre-compute (and pickle) targets for the exposures
+                # that are actually written, so this ordering keeps the
+                # parent process from redoing ~seconds of parsing per night.
+                continue
+
+            if not exposure.targets:
                 continue
 
             delete_hdf5_entry(fibers_group, reference_id_string)
@@ -96,6 +110,103 @@ def update(
             done.add(reference_id_string)
             _print(f"\traw/{observatory}/{mjd}/fibers/{reference_id_string}")
 
+
+
+MISSING_EXPOSURES_GROUP = "missing_exposures"
+
+_MISSING_EXPOSURES_DESCRIPTIONS = {
+    "observatory": "Observatory name",
+    "mjd": "MJD of the night",
+    "exposure": (
+        "Within-night exposure number (1-indexed); "
+        "-1 for observatory/MJD-level records (e.g. reason=db_unavailable)"
+    ),
+    "expected_max_db": (
+        "Maximum within-night exposure number expected from the operations "
+        "database (-1 if unknown)"
+    ),
+    "reason": (
+        "Why the exposure is flagged: one of "
+        "hole | trailing | db_unavailable | db_no_file | file_no_db"
+    ),
+}
+
+
+def read_missing_exposures(fp) -> List[Dict[str, Any]]:
+    """
+    Read the run-level /missing_exposures table from an almanac HDF5 file.
+
+    :param fp:
+        An open h5py File (or Group).
+
+    :returns:
+        A list of records (dicts) with keys: observatory, mjd, exposure,
+        expected_max_db, reason. Empty if the table is absent.
+    """
+    if MISSING_EXPOSURES_GROUP not in fp:
+        return []
+    group = fp[MISSING_EXPOSURES_GROUP]
+    rows = []
+    for observatory, mjd, exposure, expected_max_db, reason in zip(
+        group["observatory"][:],
+        group["mjd"][:],
+        group["exposure"][:],
+        group["expected_max_db"][:],
+        group["reason"][:],
+    ):
+        rows.append(
+            dict(
+                observatory=observatory.decode(),
+                mjd=int(mjd),
+                exposure=int(exposure),
+                expected_max_db=int(expected_max_db),
+                reason=reason.decode(),
+            )
+        )
+    return rows
+
+
+def write_missing_exposures(fp, rows, replace_keys=None):
+    """
+    Write the run-level /missing_exposures table to an almanac HDF5 file.
+
+    :param fp:
+        An open h5py File (or Group).
+
+    :param rows:
+        List of records (dicts) with keys: observatory, mjd, exposure,
+        expected_max_db, reason (see `apogee.classify_missing_exposures`).
+
+    :param replace_keys: [optional]
+        A set of (observatory, mjd) keys that were processed in this run.
+        Existing table entries for other keys are preserved (this supports
+        partial re-runs, e.g. with --skip-existing). If `None`, the whole
+        table is replaced by `rows`.
+    """
+    if replace_keys is not None:
+        preserved = [
+            r for r in read_missing_exposures(fp)
+            if (r["observatory"], r["mjd"]) not in replace_keys
+        ]
+        rows = preserved + list(rows)
+
+    rows = sorted(rows, key=lambda r: (r["observatory"], r["mjd"], r["exposure"]))
+
+    delete_hdf5_entry(fp, MISSING_EXPOSURES_GROUP)
+    group = fp.create_group(MISSING_EXPOSURES_GROUP, track_order=True)
+    datasets = dict(
+        observatory=np.array([r["observatory"] for r in rows], dtype="S3"),
+        mjd=np.array([r["mjd"] for r in rows], dtype=np.int64),
+        exposure=np.array([r["exposure"] for r in rows], dtype=np.int64),
+        expected_max_db=np.array(
+            [r["expected_max_db"] for r in rows], dtype=np.int64
+        ),
+        reason=np.array([r["reason"] for r in rows], dtype="S16"),
+    )
+    for name, data in datasets.items():
+        dataset = group.create_dataset(name, data=data)
+        dataset.attrs["description"] = _MISSING_EXPOSURES_DESCRIPTIONS[name]
+    return group
 
 
 def get_or_create_group(fp, group_name):
@@ -159,10 +270,11 @@ def get_hdf5_dtype(pydantic_type, sample_value=None):
         # Handle string length determination
         if dtype == 'S' and sample_value is not None:
             if isinstance(sample_value, (list, tuple, np.ndarray)):
-                max_len = max(len(str(v)) for v in sample_value)
+                max_len = max((len(str(v)) for v in sample_value), default=1)
             else:
                 max_len = len(str(sample_value)) if sample_value else 1
-            return f'S{max_len}'
+            # Guard against 'S0' (all-empty strings), which h5py rejects
+            return f'S{max(max_len, 1)}'
         elif dtype == 'S':
             return 'S100'  # Default string length
 
@@ -246,6 +358,10 @@ def write_models_to_hdf5_group(
         chunk_size: Chunk size for HDF5 datasets (for performance)
         compression: Compression algorithm ('gzip', 'lzf', 'szip', None)
     """
+    if not models:
+        # Nothing to write (e.g. a night with zero cross-matched sources);
+        # leave the group empty rather than crash on models[0].
+        return
     model_type = type(models[0])
 
     fields = { **model_type.model_fields, **model_type.model_computed_fields }
@@ -361,7 +477,7 @@ def _write_models_to_hdf5_group(
 
         chunks = (min(chunk_size, num_records),) if chunk_size is not None and num_records > chunk_size else None
         if field_data.ndim > 1 and chunks is not None:
-            chunks = (chunks[0], field_data.shape[-1])
+            chunks = (chunks[0], *field_data.shape[1:])
         compression_setting = compression if chunk_size is not None and num_records > chunk_size else None
 
         if getattr(field_spec, "annotation", None) is np.ndarray:
@@ -388,7 +504,7 @@ def _write_models_to_hdf5_group(
             # Handle variable-length data (like lists)
             if any(isinstance(value, list) for value in converted_data):
                 # Create variable-length dataset
-                dt = h5py.special_dtype(vlen=np.dtype(hdf5_dtype))
+                dt = h5.special_dtype(vlen=np.dtype(hdf5_dtype))
                 dataset = hdf5_group.create_dataset(
                     field_name,
                     (num_records,),

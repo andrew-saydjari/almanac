@@ -105,7 +105,8 @@ def parse_mjds(
     date_start: Optional[str],
     date_end: Optional[str],
     earliest_mjd: int = 0,
-    return_nones: bool = False
+    return_nones: bool = False,
+    mjds: Optional[str] = None,
 ) -> Tuple[Union[int, range, Tuple[int, ...]], int, int]:
     """Parse MJD and date parameters to determine observation date range.
 
@@ -133,11 +134,28 @@ def parse_mjds(
     has_date_range = date_start is not None or date_end is not None
 
     current_mjd = get_current_mjd()
-    n_given = sum([has_mjd_range, has_date_range, mjd is not None, date is not None])
+    n_given = sum([has_mjd_range, has_date_range, mjd is not None, date is not None,
+                   mjds is not None])
     if n_given > 1:
         raise ValueError(
-            "Cannot specify more than one of --mjd, --mjd-start/--mjd-end, --date, --date-start/--date-end"
+            "Cannot specify more than one of --mjd, --mjds, --mjd-start/--mjd-end, --date, --date-start/--date-end"
         )
+    if mjds is not None:
+        # Explicit (possibly non-contiguous) list: "60000,58588,59337". Negative
+        # entries are relative to the current MJD, matching --mjd semantics.
+        values = []
+        for tok in str(mjds).split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            v = int(tok)
+            if v < 0:
+                v += current_mjd
+            values.append(v)
+        if not values:
+            raise ValueError("--mjds given but no MJD values could be parsed")
+        values = tuple(sorted(set(values)))
+        return (values, values[0], values[-1])
     if n_given == 0:
         if return_nones:
             return (None, None, None)

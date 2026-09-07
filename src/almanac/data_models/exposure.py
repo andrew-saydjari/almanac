@@ -17,6 +17,9 @@ from almanac.data_models.utils import (
 
 from almanac.qa import lookup_bad_exposures
 
+# First MJD of the FPS era at each observatory; earlier MJDs are plate era.
+FPS_ERA_START_MJD = dict(apo=59423, lco=59809)
+
 
 class Exposure(BaseModel):
 
@@ -69,8 +72,7 @@ class Exposure(BaseModel):
 
     @computed_field(description="Whether this exposure is from the FPS era")
     def fps(self) -> bool:
-        start = dict(apo=59423, lco=59809)[self.observatory]
-        return self.mjd >= start
+        return self.mjd >= FPS_ERA_START_MJD[self.observatory]
 
     #@computed_field(description="FPI")
     #def fpi(self) -> bool:

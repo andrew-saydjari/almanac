@@ -1,6 +1,5 @@
 #from itertools import batched
 import os
-import tempfile
 from tqdm import tqdm
 from typing import List
 from peewee import JOIN, BigIntegerField
@@ -24,6 +23,26 @@ def merge_dicts(*dicts):
     }
 
 
+def _copy_sdss_ids(database, table_name: str, sdss_ids):
+    """
+    Bulk-load SDSS IDs into a (temporary) table via PostgreSQL COPY,
+    supporting both psycopg2 and psycopg (v3) cursor APIs.
+    """
+    conn = database.connection()
+    cursor = conn.cursor()
+    if hasattr(cursor, "copy_from"):
+        # psycopg2
+        import io as _io
+        buf = _io.StringIO("".join(f"{sdss_id}\n" for sdss_id in sdss_ids))
+        cursor.copy_from(buf, table_name, columns=("sdss_id",))
+    else:
+        # psycopg (v3)
+        with cursor.copy(f"COPY {table_name} (sdss_id) FROM STDIN") as copy:
+            for sdss_id in sdss_ids:
+                copy.write_row((sdss_id,))
+    conn.commit()
+
+
 def query_targeting(sdss_ids: List[int], **kwargs):
     """
     Query the SDSS database for targeting (carton) information.
@@ -38,18 +57,7 @@ def query_targeting(sdss_ids: List[int], **kwargs):
         "CREATE TEMP TABLE tmp_sdss_ids (sdss_id BIGINT PRIMARY KEY)"
     )
 
-    # Create temporary CSV file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-        for sdss_id in sdss_ids:
-            f.write(f"{sdss_id}\n")
-        tmp_path = f.name
-
-    with open(tmp_path, 'r') as f:
-        cursor = cdb.database.connection().cursor()
-        cursor.copy_from(f, 'tmp_sdss_ids', columns=('sdss_id',))
-        cdb.database.connection().commit()
-
-    os.unlink(tmp_path)
+    _copy_sdss_ids(cdb.database, 'tmp_sdss_ids', sdss_ids)
 
     class Source(cdb.CatalogdbModel):
 
@@ -74,7 +82,7 @@ def query_targeting(sdss_ids: List[int], **kwargs):
     yield from q_cartons
 
 
-def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
+def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None, max_workers=None):
     """
     Query the SDSS database for targeting, astrometry, and photometry information.
 
@@ -84,17 +92,26 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
         List of SDSS IDs to query
     batch_size : int, optional
         Number of IDs per batch (default: 10,000)
+    max_workers : int, optional
+        Number of worker processes (default: the `catalog_query_max_workers`
+        configuration setting). Each worker opens its own database connection;
+        keep this low when connecting through a single SSH tunnel.
 
     Yields
     ------
     dict
         Dictionary containing catalog data for each SDSS ID
     """
+    from almanac import config
+
+    if max_workers is None:
+        max_workers = int(getattr(config, "catalog_query_max_workers", 4))
+    max_workers = max(1, min(max_workers, os.cpu_count() or 1))
 
     meta = {}
     tqdm_kwds = tqdm_kwds or {}
     with tqdm(desc="Querying catalog", total=len(sdss_ids), **tqdm_kwds) as pb:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=32) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(_query_catalog, batch, i)
                 for i, batch in enumerate(batched(sorted(sdss_ids), batch_size))
@@ -103,11 +120,26 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None):
                 meta.update(future.result())
                 pb.update(batch_size)
 
-    raise a
     return meta
 
 
 def _query_catalog(sdss_ids: List[int], suffix=""):
+    """
+    Query the SDSS database for targeting, astrometry, and photometry
+    information, retrying (with reconnect and backoff) on transient database
+    connection errors.
+
+    Parameters
+    ----------
+    sdss_ids : List[int]
+        List of SDSS IDs to query
+    """
+    from almanac.retry import retry_on_database_error
+
+    return retry_on_database_error(_query_catalog_once)(sdss_ids, suffix=suffix)
+
+
+def _query_catalog_once(sdss_ids: List[int], suffix=""):
     """
     Query the SDSS database for targeting, astrometry, and photometry information.
 
@@ -121,26 +153,18 @@ def _query_catalog(sdss_ids: List[int], suffix=""):
 
     from almanac.database import catalogdb as cdb, targetdb as tdb
 
-    # Create temporary CSV file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-        for sdss_id in sdss_ids:
-            f.write(f"{sdss_id}\n")
-        tmp_path = f.name
-
+    # The temp table may survive a failed earlier attempt if the session is
+    # still alive (a reconnect drops it automatically).
+    cdb.database.execute_sql(f"DROP TABLE IF EXISTS tmp_sdss_ids{suffix}")
     cdb.database.execute_sql(
         f"CREATE TEMP TABLE tmp_sdss_ids{suffix} (sdss_id BIGINT PRIMARY KEY)"
     )
-    with open(tmp_path, 'r') as f:
-        cursor = cdb.database.connection().cursor()
-        cursor.copy_from(f, f'tmp_sdss_ids{suffix}', columns=('sdss_id',))
-        cdb.database.connection().commit()
+    _copy_sdss_ids(cdb.database, f"tmp_sdss_ids{suffix}", sdss_ids)
 
     cdb.database.execute_sql("SET enable_seqscan = off")
     cdb.database.execute_sql("SET enable_hashjoin = off")
     cdb.database.execute_sql("SET enable_mergejoin = off")
     cdb.database.execute_sql(f"ANALYZE tmp_sdss_ids{suffix}")
-
-    os.unlink(tmp_path)
 
     class Source(cdb.CatalogdbModel):
 

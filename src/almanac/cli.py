@@ -3,6 +3,28 @@
 import click
 
 
+def _pool_initializer(apogee_id_lookup=None):
+    """
+    Initialize a process-pool worker.
+
+    Resets any database connection state inherited from the parent (each
+    worker must open its own connection), and installs the parent-built
+    APOGEE ID -> SDSS ID lookup, if one was provided, so that workers do not
+    each re-run the heavy query that builds it.
+    """
+    from sdssdb.peewee.sdss5db import database
+
+    if hasattr(database, "_state"):
+        database._state.closed = True
+        database._state.conn = None
+    from almanac.database import database
+
+    if apogee_id_lookup is not None:
+        from almanac import apogee
+
+        apogee.set_apogee_id_lookup(apogee_id_lookup)
+
+
 @click.group(invoke_without_command=True)
 @click.option("-v", "--verbosity", count=True, help="Verbosity level")
 @click.option(
@@ -11,6 +33,8 @@ import click
     type=int,
     help="Modified Julian date to query. Use negative values to indicate relative to current MJD",
 )
+@click.option("--mjds", default=None, type=str,
+              help="Comma-separated explicit MJD list (non-contiguous OK)")
 @click.option("--mjd-start", default=None, type=int, help="Start of MJD range to query")
 @click.option("--mjd-end", default=None, type=int, help="End of MJD range to query")
 @click.option("--date", default=None, type=str, help="Date to query (e.g., 2024-01-15)")
@@ -30,11 +54,17 @@ import click
 @click.option(
     "--processes", "-p", default=None, type=int, help="Number of processes to use"
 )
+@click.option(
+    "--skip-existing",
+    is_flag=True,
+    help="Skip observatory/MJD pairs that already exist in the output file (resume mode)",
+)
 @click.pass_context
 def main(
     ctx,
     verbosity,
     mjd,
+    mjds,
     mjd_start,
     mjd_end,
     date,
@@ -46,6 +76,7 @@ def main(
     no_x_match,
     output,
     processes,
+    skip_existing,
 ):
     """
     Almanac collects metadata from planned and actual APOGEE exposures,
@@ -61,17 +92,20 @@ def main(
     from rich.live import Live
     from almanac.display import ObservationsDisplay, display_exposures
     from almanac import apogee, logger, io, utils
+    from almanac.writer import QueueWriter
     from contextlib import nullcontext
     from time import time, sleep
 
     mjds, mjd_min, mjd_max = utils.parse_mjds(
-        mjd, mjd_start, mjd_end, date, date_start, date_end
+        mjd, mjd_start, mjd_end, date, date_start, date_end, mjds=mjds
     )
     observatories = utils.get_observatories(apo, lco)
 
-    n_iterables = len(mjds) * len(observatories)
-    iterable = product(mjds, observatories)
+    tasks = list(product(mjds, observatories))
     results = []
+    failed = []  # [(observatory, mjd, error message), ...]
+    missing_rows = []  # run-level missing-exposures report records
+    processed_keys = set()  # (observatory, mjd) completed in this run
 
     display = ObservationsDisplay(mjd_min, mjd_max, observatories)
 
@@ -88,32 +122,84 @@ def main(
     )
     io_kwds = dict(fibers=fibers, compression=False)
     with h5.File(output, "a") if output else nullcontext() as fp:
+        if skip_existing and output:
+            kept = []
+            for mjd, observatory in tasks:
+                if f"raw/{observatory}/{mjd}/exposures" in fp:
+                    display.completed[observatory].add(
+                        mjd - mjd_min + display.offset
+                    )
+                else:
+                    kept.append((mjd, observatory))
+            n_skipped = len(tasks) - len(kept)
+            if n_skipped:
+                logger.info(
+                    f"Skipping {n_skipped} observatory/MJD pairs already "
+                    f"present in {output}"
+                )
+            tasks = kept
+
+        # All HDF5 writes during the run go through a dedicated writer thread
+        # with a bounded queue, so the loop below can keep collecting worker
+        # results while the previous night is being written. h5py is not
+        # thread-safe: `fp` must not be touched by this thread until the
+        # writer is closed (the skip-existing reads above happen before the
+        # writer starts; the missing-exposures table is written after it is
+        # drained and closed).
+        writer = None
+        if output:
+
+            def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
+                io.update(fp, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
+
+            def _on_write_error(item, exception):
+                observatory_w, mjd_w = item[:2]
+                logger.error(f"Failed to write {observatory_w}/{mjd_w}: {exception}")
+                failed.append((observatory_w, mjd_w, f"write failed: {exception}"))
+
+            writer = QueueWriter(
+                _write_night,
+                maxsize=max(4, 2 * (processes or 1)),
+                on_error=_on_write_error,
+            ).start()
+
         with context_manager as live:
             if processes is not None:
-
-                def initializer():
-                    from sdssdb.peewee.sdss5db import database
-
-                    if hasattr(database, "_state"):
-                        database._state.closed = True
-                        database._state.conn = None
-                    from almanac.database import database
 
                 # Parallel
                 import os
                 import signal
                 import concurrent.futures
+                from concurrent.futures.process import BrokenProcessPool
 
                 if processes < 0:
                     processes = os.cpu_count()
+
+                initargs = ()
+                if fibers and not no_x_match and apogee.any_plate_era(tasks):
+                    # Plate-era target cross-matching needs a large APOGEE ID
+                    # -> SDSS ID lookup built from a heavy database query
+                    # (~10 s, ~33 MB pickled). Build it ONCE here and ship it
+                    # to every worker through the pool initializer (free via
+                    # copy-on-write under fork), instead of each worker
+                    # independently re-querying the database on first use.
+                    logger.info(
+                        "Building APOGEE ID lookup in parent "
+                        "(plate-era nights present)"
+                    )
+                    initargs = (apogee.create_apogee_id_lookup(),)
+
                 with concurrent.futures.ProcessPoolExecutor(
-                    max_workers=processes, initializer=initializer
+                    max_workers=processes,
+                    initializer=_pool_initializer,
+                    initargs=initargs,
                 ) as pool:
 
+                    task_iter = iter(tasks)
                     try:
-                        futures = set()
-                        for n, (mjd, observatory) in enumerate(iterable, start=1):
-                            futures.add(
+                        futures = {}  # future -> (mjd, observatory)
+                        for n, (mjd, observatory) in enumerate(task_iter, start=1):
+                            futures[
                                 pool.submit(
                                     apogee.get_almanac_data,
                                     observatory,
@@ -121,7 +207,7 @@ def main(
                                     fibers,
                                     not no_x_match,
                                 )
-                            )
+                            ] = (mjd, observatory)
                             if n == processes:
                                 break
 
@@ -129,31 +215,47 @@ def main(
                         while len(futures) > 0:
 
                             future = next(concurrent.futures.as_completed(futures))
-
-                            observatory, mjd, exposures, sequences = result = (
-                                future.result()
-                            )
-
+                            mjd, observatory = futures.pop(future)
                             v = mjd - mjd_min + display.offset
-                            missing = [e.image_type == "missing" for e in exposures]
-                            if any(missing):
-                                display.missing.add(v)
-                                # buffered_critical_logs.extend(missing)
 
-                            if not exposures:
-                                display.no_data[observatory].add(v)
+                            try:
+                                observatory, mjd, exposures, sequences, missing = (
+                                    result
+                                ) = future.result()
+                            except KeyboardInterrupt:
+                                raise
+                            except BrokenProcessPool:
+                                failed.append(
+                                    (observatory, mjd, "process pool broken")
+                                )
+                                raise
+                            except Exception as e:
+                                # Per-MJD fault isolation: record and continue.
+                                logger.exception(
+                                    f"Failed to process {observatory}/{mjd}: {e}"
+                                )
+                                failed.append((observatory, mjd, str(e)))
                             else:
-                                display.completed[observatory].add(v)
-                                results.append(result)
-                                if output:
-                                    io.update(
-                                        fp,
-                                        observatory,
-                                        mjd,
-                                        exposures,
-                                        sequences,
-                                        **io_kwds,
-                                    )
+                                processed_keys.add((observatory, mjd))
+                                missing_rows.extend(missing)
+
+                                if any(
+                                    e.image_type == "missing" for e in exposures
+                                ):
+                                    display.missing.add(v)
+
+                                if not exposures:
+                                    display.no_data[observatory].add(v)
+                                else:
+                                    display.completed[observatory].add(v)
+                                    results.append(result)
+                                    if writer is not None:
+                                        writer.submit(
+                                            observatory,
+                                            mjd,
+                                            exposures,
+                                            sequences,
+                                        )
 
                             if (
                                 live is not None
@@ -161,14 +263,13 @@ def main(
                             ):
                                 live.update(display.create_display())
                                 t = time()
-                            futures.remove(future)
 
                             try:
-                                mjd, observatory = next(iterable)
+                                mjd, observatory = next(task_iter)
                             except StopIteration:
                                 None
                             else:
-                                futures.add(
+                                futures[
                                     pool.submit(
                                         apogee.get_almanac_data,
                                         observatory,
@@ -176,12 +277,25 @@ def main(
                                         fibers,
                                         not no_x_match,
                                     )
-                                )
+                                ] = (mjd, observatory)
 
+                    except BrokenProcessPool as e:
+                        # The pool cannot recover; mark everything outstanding
+                        # as failed but continue so the missing-exposures table
+                        # and failure report are still written.
+                        logger.error(f"Process pool broke: {e}")
+                        for mjd_o, obs_o in futures.values():
+                            failed.append((obs_o, mjd_o, "process pool broken"))
+                        for mjd_o, obs_o in task_iter:
+                            failed.append((obs_o, mjd_o, "process pool broken"))
                     except KeyboardInterrupt:
                         for pid in pool._processes:
                             os.kill(pid, signal.SIGKILL)
                         pool.shutdown(wait=False, cancel_futures=True)
+                        if writer is not None:
+                            # Let any in-flight write finish (so the file is
+                            # not truncated mid-write), drop queued nights.
+                            writer.close(drain=False)
                         try:
                             fp.close()
                         except:
@@ -189,24 +303,43 @@ def main(
                         raise KeyboardInterrupt
             else:
                 t = time()
-                for mjd, observatory in iterable:
-                    *_, exposures, sequences = result = apogee.get_almanac_data(
-                        observatory, mjd, fibers, not no_x_match
-                    )
+                for mjd, observatory in tasks:
                     v = mjd - mjd_min + display.offset
-                    if any([e.image_type == "missing" for e in exposures]):
-                        display.missing.add(v)
-                        # buffered_critical_logs.extend(missing)
-
-                    if not exposures:
-                        display.no_data[observatory].add(v)
+                    try:
+                        (
+                            observatory, mjd, exposures, sequences, missing
+                        ) = result = apogee.get_almanac_data(
+                            observatory, mjd, fibers, not no_x_match
+                        )
+                    except KeyboardInterrupt:
+                        if writer is not None:
+                            writer.close(drain=False)
+                        raise
+                    except Exception as e:
+                        # Per-MJD fault isolation: record and continue.
+                        logger.exception(
+                            f"Failed to process {observatory}/{mjd}: {e}"
+                        )
+                        failed.append((observatory, mjd, str(e)))
                     else:
-                        display.completed[observatory].add(v)
-                        results.append(result)
-                        if output:
-                            io.update(
-                                fp, observatory, mjd, exposures, sequences, **io_kwds
-                            )
+                        processed_keys.add((observatory, mjd))
+                        missing_rows.extend(missing)
+
+                        if any(e.image_type == "missing" for e in exposures):
+                            display.missing.add(v)
+
+                        if not exposures:
+                            display.no_data[observatory].add(v)
+                        else:
+                            display.completed[observatory].add(v)
+                            results.append(result)
+                            if writer is not None:
+                                writer.submit(
+                                    observatory,
+                                    mjd,
+                                    exposures,
+                                    sequences,
+                                )
 
                     if live is not None and (time() - t) > 1 / refresh_per_second:
                         live.update(display.create_display())
@@ -217,13 +350,44 @@ def main(
                 if verbosity <= 1 and output is None:
                     sleep(3)
 
+        if writer is not None:
+            # Drain all queued nights and stop the writer thread before this
+            # thread touches `fp` again.
+            writer.close(drain=True)
+
+        if output:
+            # Run-level missing-exposures table. Entries from previous runs
+            # for (observatory, mjd) pairs not processed here (skipped or
+            # failed) are preserved.
+            io.write_missing_exposures(fp, missing_rows, replace_keys=processed_keys)
+
     if verbosity >= 2:
-        for observatory, mjd, exposures, sequences in results:
+        for observatory, mjd, exposures, sequences, _missing in results:
             display_exposures(exposures, sequences)
 
         # Show critical logs at the end to avoid disrupting the display
         for item in buffered_critical_logs:
             logger.critical(item)
+
+    if missing_rows:
+        n_mjds = len({(r["observatory"], r["mjd"]) for r in missing_rows})
+        logger.warning(
+            f"Recorded {len(missing_rows)} missing-exposure entries across "
+            f"{n_mjds} observatory/MJD pairs"
+            + (" (see /missing_exposures in the output file)" if output else "")
+        )
+
+    if failed:
+        logger.warning(
+            f"{len(failed)} observatory/MJD pairs failed and were skipped:"
+        )
+        for observatory, mjd, message in failed:
+            logger.warning(f"  - {observatory}/{mjd}: {message}")
+        if output:
+            logger.warning(
+                "Re-run the same command with --skip-existing to retry only "
+                "the failed pairs."
+            )
 
 
 @main.command()
@@ -366,8 +530,10 @@ def lookup(identifiers, output, **kwargs):
 
                 if output and key not in done:
                     done.add(key)
-                    r = get_almanac_data(*key, fibers=True, meta=True)
-                    io.update(fp, *r, **io_kwds)
+                    observatory_, mjd_, exposures_, sequences_, _missing = (
+                        get_almanac_data(*key, fibers=True, meta=True)
+                    )
+                    io.update(fp, observatory_, mjd_, exposures_, sequences_, **io_kwds)
 
                 if exposure.field_id in field_ids:
                     for target in exposure.targets:
@@ -392,7 +558,7 @@ def lookup(identifiers, output, **kwargs):
                             i += 1
                             break
     if output:
-        console.print(f"Updated {output_path} with:")
+        console.print(f"Updated {output} with:")
         for obs, mjd in done:
             console.print(f"  - {obs}/{mjd}")
 
@@ -419,6 +585,8 @@ def _get_sdss_ids(fp, obs, mjd):
     type=int,
     help="Modified Julian date to query. Use negative values to indicate relative to current MJD",
 )
+@click.option("--mjds", default=None, type=str,
+              help="Comma-separated explicit MJD list (non-contiguous OK)")
 @click.option("--mjd-start", default=None, type=int, help="Start of MJD range to query")
 @click.option("--mjd-end", default=None, type=int, help="End of MJD range to query")
 @click.option("--date", default=None, type=str, help="Date to query (e.g., 2024-01-15)")
@@ -429,9 +597,20 @@ def _get_sdss_ids(fp, obs, mjd):
 @click.option("--apo", is_flag=True, help="Query Apache Point Observatory data")
 @click.option("--lco", is_flag=True, help="Query Las Campanas Observatory data")
 @click.option("--p", default=-1, type=int, help="Number of workers to use")
+@click.option(
+    "--query-workers",
+    default=None,
+    type=int,
+    help=(
+        "Number of parallel database query workers (default: the "
+        "catalog_query_max_workers configuration setting). Each worker opens "
+        "its own database connection; keep this low over an SSH tunnel."
+    ),
+)
 def metadata(
     input_path,
     mjd,
+    mjds,
     mjd_start,
     mjd_end,
     date,
@@ -440,6 +619,7 @@ def metadata(
     apo,
     lco,
     p,
+    query_workers,
     **kwargs,
 ):
     """Add astrometry and photometry to an existing Almanac file."""
@@ -457,14 +637,15 @@ def metadata(
 
     observatories = utils.get_observatories(apo, lco)
     mjds, *_ = utils.parse_mjds(
-        mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True
+        mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True, mjds=mjds
     )
     sdss_ids = set()
     with h5.File(input_path, "r") as fp:
         if mjds is None:
             mjds = []
             for obs in observatories:
-                mjds.extend(fp[f"raw/{obs}"])
+                if f"raw/{obs}" in fp:
+                    mjds.extend(fp[f"raw/{obs}"])
             mjds = list(set(mjds))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=p) as executor:
@@ -483,7 +664,7 @@ def metadata(
     from sdss_semaphore.targeting import TargetingFlags
     import numpy as np
 
-    results = query(sdss_ids)
+    results = query(sdss_ids, max_workers=query_workers)
 
     # Compute sdss5_target_flags from carton_pks
     # First pass: collect all sources and their carton_pks
@@ -493,17 +674,20 @@ def metadata(
         carton_pks = results[sdss_id].pop("carton_pks", set())
         carton_pks_list.append(list(carton_pks) if carton_pks else [])
 
-    # Initialize targeting flags array
-    flags = TargetingFlags(np.zeros((len(sdss_id_list), 1)))
-    
-    # Set bits for each source based on their carton_pks
+    # Initialize targeting flags array. Guard the empty case: sdss_semaphore's
+    # TargetingFlags indexes array[0] during construction, so zero cross-matched
+    # sources (e.g. plate-era nights with no sdss_id matches) would IndexError.
     unknown_carton_pks = set()
-    for i, carton_pks in enumerate(carton_pks_list):
-        for carton_pk in carton_pks:
-            try:
-                flags.set_bit_by_carton_pk(i, carton_pk)
-            except KeyError:
-                unknown_carton_pks.add(carton_pk)
+    if sdss_id_list:
+        flags = TargetingFlags(np.zeros((len(sdss_id_list), 1)))
+
+        # Set bits for each source based on their carton_pks
+        for i, carton_pks in enumerate(carton_pks_list):
+            for carton_pk in carton_pks:
+                try:
+                    flags.set_bit_by_carton_pk(i, carton_pk)
+                except KeyError:
+                    unknown_carton_pks.add(carton_pk)
 
     # Convert dict of dicts to list of Source models for HDF5 writing
     sources = []
@@ -1095,8 +1279,6 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
                 _write_models_to_hdf5_group(
                     star_fields, star_dict, fp, callback=callback(tid_write_stars)
                 )
-
-            raise a
 
     if unknown_carton_pks:
         click.echo(f"Warning: {len(unknown_carton_pks):,} unknown cartons encountered")
