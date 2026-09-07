@@ -858,9 +858,16 @@ def metadata(
             ]
             for future in tqdm(
                 concurrent.futures.as_completed(futures),
-                desc="Collecting SDSS identifiers",
+                total=len(futures),
+                unit="night",
+                desc="Reading fibre mappings",
             ):
                 sdss_ids.update(future.result())
+
+    logger.info(
+        f"Found {len(sdss_ids - {-1})} unique SDSS identifiers across "
+        f"{len(with_fibers)} nights"
+    )
 
     from almanac.data_models.source import Source
     from almanac.io import write_models_to_hdf5_group, get_or_create_group, delete_hdf5_entry
