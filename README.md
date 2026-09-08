@@ -155,6 +155,10 @@ almanac add metadata /path/to/file.h5
 almanac add metadata /path/to/file.h5 --query-workers 4 # be gentle on remote tunnels
 ```
 
+Note: `add metadata` is strongly sensitive to database locality — full-catalog passes
+measured ~660 ids/s cold DB-local versus 13--26k ids/s warm, and are impractically slow
+through an SSH tunnel. Run it on a host local to the SDSS database (e.g. at Utah).
+
 ## Configuration
 
 You can view and change the `almanac` configuration settings through the `almanac config` interface. To view all current settings and to see the configuration file path:

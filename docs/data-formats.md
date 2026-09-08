@@ -391,7 +391,7 @@ Pydantic ensures type safety throughout the data pipeline:
 
 ### Quality Assurance
 
-- **Bad exposure flagging**: Automatic detection of known problematic exposures
+- **Bad exposure flagging**: Each exposure carries a computed `flagged_bad` column, set automatically from the bundled known-bad exposure list (`src/almanac/etc/bad_exposures.csv`) and from missing plate/configuration information on object frames. This automatic property is the supported flagging mechanism; the `almanac flag` CLI subcommand is an unimplemented stub and should not be used.
 - **Fiber mapping corrections**: Historical fixes for known fiber mapping errors
 - **Coordinate validation**: Ensures valid sky coordinates
 - **Identifier consistency**: Validates survey identifiers and relationships

@@ -123,6 +123,8 @@ almanac add metadata results.h5 --query-workers 4
 - `--p <integer>`: Number of workers used to read `sdss_id` values from the file
 - `--query-workers <integer>`: Number of parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection; keep this low when connecting through a single SSH tunnel.
 
+**Operational note — run this database-local.** `add metadata` throughput is strongly sensitive to database locality and cache state. Measured on a full-survey file (~4.7 million unique `sdss_id`s) with the database on the local network: ~660 ids/s (cold catalog cache; ~2h15m wall), versus 13,000–26,000 ids/s on small warmed-up slices. Over an SSH tunnel the same pass becomes impractically slow. Run `add metadata` on a host local to the SDSS database (e.g. at Utah), never through a tunnel, and budget memory for the result set (all query results are held in RAM until the final write; ~18 GB for ~4.7M sources).
+
 ## Configuration Commands
 
 ### `almanac config show`
