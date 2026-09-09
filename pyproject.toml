@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sdss-almanac"
-version = "0.4.3"
+version = "0.5.2"
 authors = [
     { name = "Andy Casey", email = "andrew.casey@monash.edu" }
 ]
@@ -36,6 +36,7 @@ dependencies = [
     "rich",
     "pydantic",
     "sdss-semaphore>=0.2.8",
+    "healpy>=1.20.0",
 ]
 
 [project.urls]
