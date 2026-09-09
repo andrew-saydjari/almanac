@@ -212,8 +212,25 @@ class Exposure(BaseModel):
             f"{str(self.config_id)[:-3].zfill(3)}XXX/"
             f"{str(self.config_id)[:-2].zfill(4)}XX/"
         )
-        # fall back to confSummary if confSummaryFS does not exist
-        for flavor in ("FS", ""):
+        # Preference order: FS -> S -> base.
+        #
+        # "F" means FVC-loop corrected positions; "S" means the sky fibers have
+        # been assigned. A BOSS-led configuration observed without an FVC loop
+        # correction produces no confSummaryF/FS at all, but it DOES get a
+        # confSummaryS, because sky assignment runs regardless of the FVC loop.
+        #
+        # Skipping "S" therefore fell all the way back to the base confSummary,
+        # which carries no sky_apogee rows -- every APOGEE fiber came back with
+        # an empty category, and downstream pipelines dropped the exposure.
+        # Measured on apo config 5532: confSummaryS has 480 sky_apogee rows,
+        # the base file has 0.
+        #
+        # "F" alone (FVC-corrected but sky not yet assigned) is deliberately NOT
+        # in this chain: it would give better astrometry but still no APOGEE
+        # category, which is the thing consumers need. It also does not occur in
+        # practice -- across the affected configurations, "F" is only ever
+        # present when "FS" is too.
+        for flavor in ("FS", "S", ""):
             path = f"{directory}/confSummary{flavor}-{self.config_id}.par"
             if os.path.exists(path):
                 return path
