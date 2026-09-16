@@ -10,7 +10,7 @@ from scipy.spatial.distance import cdist
 
 from almanac import config, logger, utils
 from almanac.data_models import Exposure
-from almanac.data_models.types import ImageType
+from almanac.data_models.types import ImageType, assigns_sdss_id
 from almanac.data_models.utils import mjd_to_exposure_prefix, get_exposure_path
 
 
@@ -662,8 +662,11 @@ def get_almanac_data(
                 for i in iterable:
                     exposure = exposures[i]
                     for target in exposure.targets:
-                        if target.category == "unplugged":
-                            # Don't assign sdss_id to unplugged targets.
+                        if not assigns_sdss_id(target.category):
+                            # Don't assign sdss_id to unplugged targets, or to
+                            # off-target fibers: the positioner never reached
+                            # the assigned target, so whatever light the fiber
+                            # collected did not come from that source.
                             continue
 
                         key, identifier = parse_target_identifier(target)

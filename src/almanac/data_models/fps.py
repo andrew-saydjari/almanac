@@ -15,6 +15,13 @@ class FPSTarget(BaseModel):
     catalogid: Int64 = Field(default=-1)
     twomass_designation: str = Field(default="", alias="tmass_id")
     category: Category = Field(description="Category of the target")
+    original_category: Category = Field(
+        default="",
+        description=(
+            "Category reported by the configuration summary file, kept only when "
+            "almanac has changed `category` (e.g. to 'offtarget')"
+        )
+    )
     cadence: str = Field(description="Cadence identifier", default="")
     firstcarton: str = Field(description="Main carton from which this carton was drawn", default="")
     program: str = Field(description="Program for 'firstcarton'", default="")
@@ -82,13 +89,66 @@ class FPSTarget(BaseModel):
         return (self.catalogid > 0
             and not self.category.startswith("sky_")
             and self.category != ""
+            and assigns_sdss_id(self.category)
         )
+
+    @property
+    def off_target(self) -> bool:
+        """
+        Whether the positioner was assigned a target but did not reach it.
+
+        When this is true the fiber observed some other patch of sky, so no
+        target identity (`sdss_id`) can be asserted for it.
+        """
+        return bool(self.assigned) and not bool(self.on_target)
 
     @field_validator("twomass_designation", mode="before")
     def strip_twomass_designation(cls, v) -> str:
         """ Convert a target ID to a standardized designation format. """
         return sanitise_twomass_designation(v)
 
+    @model_validator(mode="before")
+    @classmethod
+    def relabel_off_target_fibers(cls, data):
+        """
+        Relabel fibers whose positioner did not reach its assigned target.
+
+        A positioner that was assigned a target (`assigned == 1`) but did not
+        reach it (`on_target == 0`) — because it was decollided, disabled, or
+        failed to converge — still observes sky, and the configuration summary
+        file keeps reporting the assigned target's category and identifiers for
+        it. Any `sdss_id` attached to such a fiber is an assertion that the
+        assigned star's light is in the fiber, and that assertion is false.
+
+        These fibers are given the `offtarget` category, and are not
+        cross-matched to an `sdss_id` (see `almanac.apogee.get_almanac_data`),
+        exactly as sky and unplugged fibers are not. The original category is
+        kept in `original_category`, and all of the raw configuration summary
+        columns (`assigned`, `on_target`, `valid`, `disabled`, `decollided`,
+        `catalogid`, `ra`, `dec`, ...) are written unchanged, so these fibers
+        remain identifiable for any later serendipitous recovery work.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # Only relabel when the configuration summary file actually reported
+        # both flags. A missing `on_target` column would otherwise default to
+        # False and relabel every assigned fiber.
+        if "assigned" not in data or "on_target" not in data:
+            return data
+
+        category = validate_str(data.get("category", ""))
+        if not asserts_target_identity(category):
+            return data
+
+        assigned = bool(data["assigned"])
+        on_target = bool(data["on_target"])
+        if assigned and not on_target:
+            data = dict(data)
+            data["category"] = OFF_TARGET_CATEGORY
+            data["original_category"] = category
+            data["sdss_id"] = -1
+        return data
 
     class Config:
         validate_by_name = True
