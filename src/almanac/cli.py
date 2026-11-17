@@ -1647,8 +1647,10 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
     """Create a star-level summary file"""
 
     import h5py as h5
+    import numpy as np
     from copy import deepcopy
     from collections import Counter
+    from almanac.data_models.types import IDENTIFIED_STAR_CATEGORIES
 
     stars = {}
     default = dict(
@@ -1699,11 +1701,9 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
                         (config_group["catalogid"][:] > 0)
                         | (config_group["sdss_id"][:] > 0)
                         | (config_group["twomass_designation"][:].astype(str) != "")
-                    ) * (
-                        (config_group["category"][:].astype(str) == "science")
-                        | (config_group["category"][:].astype(str) == "standard_apogee")
-                        | (config_group["category"][:].astype(str) == "standard_boss")
-                        | (config_group["category"][:].astype(str) == "open_fiber")
+                    ) * np.isin(
+                        config_group["category"][:].astype(str),
+                        IDENTIFIED_STAR_CATEGORIES,
                     )
                     sdss_ids = config_group["sdss_id"][:][ok]
                     catalogids = config_group["catalogid"][:][ok]

@@ -259,7 +259,16 @@ The `PlateTarget` model (`almanac.data_models.PlateTarget`) represents targets o
 
 ### Category Types
 
-**`Category`**: `Literal["", "science", "sky_apogee", "sky_boss", "standard_apogee", "standard_boss", "open_fiber"]`
+**`Category`**: `Literal["", "bonus", "science", "veto_location_boss", "veto_location_apogee", "sky_apogee", "sky_boss", "standard_apogee", "standard_boss", "open_fiber", "unplugged"]`
+
+`veto_location_boss` and `veto_location_apogee` appear in manually built FPS
+designs. They are APOGEE fibers placed on real catalog stars: Gaia bright
+neighbors of BOSS targets (`veto_location_boss`, carton
+`ops_gaia_brightneighbors`) and bright 2MASS stars (`veto_location_apogee`,
+carton `ops_2mass_psc_brightneighbors`). `almanac` keeps these category names
+unchanged, cross-matches the fibers to an `sdss_id` exactly as it does `science`
+fibers, and includes them in star-level summaries. The full list of categories
+treated as identified stars is `almanac.data_models.types.IDENTIFIED_STAR_CATEGORIES`.
 
 ### Hole Types
 
