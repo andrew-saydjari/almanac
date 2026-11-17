@@ -102,7 +102,10 @@ def asserts_target_identity(category: str) -> bool:
 
     Sky fibers, unplugged fibers, fibers with no category, and fibers already
     marked as off-target make no such assertion, so they are not candidates for
-    the off-target relabeling.
+    the off-target relabeling. Every other category does, including
+    `veto_location_boss` and `veto_location_apogee`: like `science`, an
+    on-target one keeps its name and is cross-matched, and an assigned but
+    off-target one becomes `offtarget` with no `sdss_id`.
 
     :param category:
         The target category (e.g. "science").

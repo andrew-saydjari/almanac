@@ -22,6 +22,11 @@ the FIBERMAP trimmed to 9 rows:
     264         APOGEE     standard_apogee       1
     117         APOGEE     sky_apogee            1
     3           BOSS       (empty)               0
+
+The veto-location categories assert a target identity, exactly like `science`:
+on-target fibers keep their name and are cross-matched for an `sdss_id`;
+assigned-but-off-target ones (positioners 493 and 973 here) are relabeled
+`offtarget`, with `original_category` preserved and no `sdss_id`.
 """
 import os
 import shutil
@@ -37,7 +42,13 @@ from almanac import config
 from almanac.apogee import parse_target_identifier
 from almanac.data_models.exposure import Exposure
 from almanac.data_models.fps import FPSTarget
-from almanac.data_models.types import IDENTIFIED_STAR_CATEGORIES
+from almanac.data_models.types import (
+    IDENTIFIED_STAR_CATEGORIES,
+    OFF_TARGET_CATEGORY,
+    asserts_target_identity,
+    assigns_sdss_id,
+)
+from almanac.io import write_models_to_hdf5_group
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "data", "confSummaryFS-28001-trimmed.par")
 CONFIG_ID = 28001
@@ -77,10 +88,9 @@ def _real_targets(exposure):
 
 
 def _reported_category(target):
-    # The category the confSummary file reported. If off-target relabeling is
-    # in place (fork PR #10), an off-target fiber's `category` becomes
-    # "offtarget" and the reported one moves to `original_category`.
-    return getattr(target, "original_category", "") or target.category
+    # The category the confSummary file reported: for a relabeled off-target
+    # fiber it lives in `original_category`.
+    return target.original_category or target.category
 
 
 def test_veto_location_rows_validate_and_keep_their_category(sdsscore):
@@ -90,14 +100,41 @@ def test_veto_location_rows_validate_and_keep_their_category(sdsscore):
         target = targets[fiber_id]
         assert target.on_target is on_target
         assert _reported_category(target) == category
-        if on_target:
+        if on_target or not asserts_target_identity(category):
             # Never relabeled (e.g. to "science"): the category is kept verbatim.
             assert target.category == category
+            assert target.original_category == ""
         else:
-            # Off-target fibers keep their category too, unless off-target
-            # relabeling is in place, in which case they become "offtarget",
-            # exactly like an off-target science fiber.
-            assert target.category in (category, "offtarget")
+            # Assigned but off target: relabeled exactly like a science fiber.
+            assert target.category == OFF_TARGET_CATEGORY
+            assert target.original_category == category
+            assert target.sdss_id == -1
+
+
+@pytest.mark.parametrize("category", VETO_CATEGORIES)
+def test_veto_location_categories_assert_a_target_identity(category):
+    assert asserts_target_identity(category)
+    assert assigns_sdss_id(category)
+
+
+@pytest.mark.parametrize("category", VETO_CATEGORIES)
+def test_both_outcomes_present_in_the_real_rows(sdsscore, category):
+    targets = _real_targets(_exposure())
+    rows = [t for t in targets.values() if _reported_category(t) == category]
+    on = [t for t in rows if t.on_target]
+    off = [t for t in rows if not t.on_target]
+    assert len(on) == 2 and len(off) == 1
+    for t in on:
+        assert t.category == category
+        assert t.expected_to_be_assigned_sdss_id
+        assert assigns_sdss_id(t.category)
+    for t in off:
+        assert t.assigned
+        assert t.category == OFF_TARGET_CATEGORY
+        assert t.original_category == category
+        assert t.sdss_id == -1
+        assert not t.expected_to_be_assigned_sdss_id
+        assert not assigns_sdss_id(t.category)
 
 
 def test_veto_location_rows_carry_catalog_identity(sdsscore):
@@ -115,7 +152,7 @@ def test_veto_location_rows_carry_catalog_identity(sdsscore):
 def test_veto_location_rows_are_eligible_for_sdss_id_cross_match(sdsscore):
     targets = _real_targets(_exposure())
     for target in targets.values():
-        if target.on_target and target.category in VETO_CATEGORIES + ("standard_apogee",):
+        if target.category in VETO_CATEGORIES + ("standard_apogee",):
             assert target.expected_to_be_assigned_sdss_id
             # These are v1 catalogids, so the cross-match goes straight
             # through SDSS_ID_flat on catalogid, as for science targets.
@@ -128,7 +165,7 @@ def test_veto_location_categories_are_identified_stars():
     assert "science" in IDENTIFIED_STAR_CATEGORIES
     for category in VETO_CATEGORIES:
         assert category in IDENTIFIED_STAR_CATEGORIES
-    for category in ("", "bonus", "sky_apogee", "sky_boss", "unplugged"):
+    for category in ("", "bonus", "sky_apogee", "sky_boss", "unplugged", OFF_TARGET_CATEGORY):
         assert category not in IDENTIFIED_STAR_CATEGORIES
 
 
@@ -196,12 +233,28 @@ def test_veto_location_fibers_are_included_in_star_list(sdsscore, tmp_path):
         target = targets[fiber_id]
         if category == "sky_apogee":
             assert 1000 + fiber_id not in listed, (fiber_id, category)
-        elif on_target or target.category != "offtarget":
+        elif on_target:
             # Veto-location fibers are listed exactly like science fibers
             # (and like the standard_apogee fiber here).
             assert 1000 + fiber_id in listed, (fiber_id, category)
         else:
-            # With off-target relabeling in place, an off-target veto-location
-            # fiber has no sdss_id and is not listed, like an off-target
-            # science fiber.
+            # An off-target veto-location fiber has no sdss_id and is not
+            # listed, like an off-target science fiber.
+            assert target.category == OFF_TARGET_CATEGORY
             assert 1000 + fiber_id not in listed, (fiber_id, category)
+
+
+def test_veto_location_fibers_written_to_hdf5(sdsscore, tmp_path):
+    targets = sorted(_real_targets(_exposure()).values(), key=lambda t: t.fiber_id)
+    with h5.File(tmp_path / "fibers.h5", "a") as fp:
+        write_models_to_hdf5_group(targets, fp.create_group("fibers"))
+        group = fp["fibers"]
+        written = dict(zip(
+            group["fiber_id"][:],
+            zip(group["category"][:].astype(str), group["original_category"][:].astype(str)),
+        ))
+    for fiber_id, (category, on_target) in EXPECTED.items():
+        if on_target or not asserts_target_identity(category):
+            assert written[fiber_id] == (category, "")
+        else:
+            assert written[fiber_id] == (OFF_TARGET_CATEGORY, category)
