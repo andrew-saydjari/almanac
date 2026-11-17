@@ -60,6 +60,12 @@ ImageType = Annotated[
     ],
     BeforeValidator(validate_str)
 ]
+
+#: Category given to an FPS fiber whose positioner was assigned a target but did
+#: not reach it (`assigned == 1` and `on_target == 0`). The fiber observed some
+#: other patch of sky, so the assigned target's identity does not apply to it.
+OFF_TARGET_CATEGORY = "offtarget"
+
 Category = Annotated[
     Literal[
         "",
@@ -80,9 +86,43 @@ Category = Annotated[
         "standard_boss",
         "open_fiber",
         "unplugged",
+        OFF_TARGET_CATEGORY,
     ],
     BeforeValidator(validate_str)
 ]
+
+#: Categories which make no assertion about which target was in the fiber, and so
+#: are never cross-matched to an `sdss_id`.
+CATEGORIES_WITHOUT_SDSS_ID = ("unplugged", OFF_TARGET_CATEGORY)
+
+
+def asserts_target_identity(category: str) -> bool:
+    """
+    Whether a category asserts that a particular target was in the fiber.
+
+    Sky fibers, unplugged fibers, fibers with no category, and fibers already
+    marked as off-target make no such assertion, so they are not candidates for
+    the off-target relabeling.
+
+    :param category:
+        The target category (e.g. "science").
+    """
+    return (
+        category != ""
+    and category not in CATEGORIES_WITHOUT_SDSS_ID
+    and not category.startswith("sky_")
+    )
+
+
+def assigns_sdss_id(category: str) -> bool:
+    """
+    Whether a fiber with this category should be assigned an `sdss_id`.
+
+    :param category:
+        The target category (e.g. "science").
+    """
+    return category not in CATEGORIES_WITHOUT_SDSS_ID
+
 
 HoleType = Annotated[
     Literal[

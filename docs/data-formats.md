@@ -91,7 +91,8 @@ The `FPSTarget` model (`almanac.data_models.FPSTarget`) represents targets obser
 | `sdss_id` | `Int64` | | SDSS unique identifier |
 | `catalogid` | `Int64` | | Catalog identifier |
 | `twomass_designation` | `str` | `tmass_id` | 2MASS designation |
-| `category` | `Category` | | Target category |
+| `category` | `Category` | | Target category (see "Off-target fibers", below) |
+| `original_category` | `Category` | | Category reported by the configuration summary file, kept only when `almanac` has changed `category` |
 | `cadence` | `str` | | Observing cadence |
 | `firstcarton` | `str` | | Primary carton name |
 | `program` | `str` | | Survey program |
@@ -259,7 +260,7 @@ The `PlateTarget` model (`almanac.data_models.PlateTarget`) represents targets o
 
 ### Category Types
 
-**`Category`**: `Literal["", "bonus", "science", "veto_location_boss", "veto_location_apogee", "sky_apogee", "sky_boss", "standard_apogee", "standard_boss", "open_fiber", "unplugged"]`
+**`Category`**: `Literal["", "bonus", "science", "veto_location_boss", "veto_location_apogee", "sky_apogee", "sky_boss", "standard_apogee", "standard_boss", "open_fiber", "unplugged", "offtarget"]`
 
 `veto_location_boss` and `veto_location_apogee` appear in manually built FPS
 designs. They are APOGEE fibers placed on real catalog stars: Gaia bright-neighbor
@@ -267,7 +268,9 @@ stars (`veto_location_boss`, carton
 `ops_gaia_brightneighbors`) and bright 2MASS stars (`veto_location_apogee`,
 carton `ops_2mass_psc_brightneighbors`). `almanac` keeps these category names
 unchanged, cross-matches the fibers to an `sdss_id` exactly as it does `science`
-fibers, and includes them in star-level summaries. The full list of categories
+fibers, and includes them in star-level summaries. Like `science` fibers, they
+assert a target identity, so an assigned-but-off-target one is relabeled
+`offtarget` (see "Off-target fibers", below). The full list of categories
 treated as identified stars is `almanac.data_models.types.IDENTIFIED_STAR_CATEGORIES`.
 
 ### Hole Types
@@ -301,6 +304,35 @@ The Pydantic models include automatic validation and cleaning:
 #### FPSTarget Model
 - Fixes early fiber mapping duplicates for spectrograph 2
 - Standardizes 2MASS designations
+- Relabels off-target fibers (see below)
+
+### Off-target fibers
+
+An FPS positioner can be assigned a target (`assigned = 1`) and yet not reach it
+(`on_target = 0`), because it was moved to resolve a mechanical collision
+(`decollided = 1`), because the fiber is disabled, or because the on-sky
+coordinates could not be converted to robot angles. The fiber still collects
+light, but from some other patch of sky: on apo MJD 60774 one such fiber
+observed a field star 9 arcmin from its assigned target.
+
+The configuration summary file keeps reporting the assigned target's category and
+identifiers for these fibers. `almanac` therefore relabels them:
+
+| Field | Off-target fiber |
+|-------|------------------|
+| `category` | `offtarget` |
+| `original_category` | the category the configuration summary file reported (e.g. `science`) |
+| `sdss_id` | `-1` (never cross-matched, exactly as for sky and unplugged fibers) |
+
+The predicate is `assigned == 1 and on_target == 0`, and it is applied only to
+categories that assert a target identity: sky, unplugged, and empty categories
+are left alone. Everything else the configuration summary file reported —
+`assigned`, `on_target`, `valid`, `disabled`, `decollided`, `catalogid`, `ra`,
+`dec`, `alpha`, `beta`, the wok and focal-plane coordinates — is written
+unchanged, so these fibers stay identifiable and the relabeling is reversible.
+
+The plate era has no equivalent columns, so `PlateTarget` rows are never
+relabeled.
 
 #### PlateTarget Model
 - Applies historical fiber mapping fixes for specific MJD ranges
