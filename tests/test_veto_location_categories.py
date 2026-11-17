@@ -76,19 +76,33 @@ def _real_targets(exposure):
     return {t.fiber_id: t for t in exposure.targets if t.category != "bonus"}
 
 
+def _reported_category(target):
+    # The category the confSummary file reported. If off-target relabeling is
+    # in place (fork PR #10), an off-target fiber's `category` becomes
+    # "offtarget" and the reported one moves to `original_category`.
+    return getattr(target, "original_category", "") or target.category
+
+
 def test_veto_location_rows_validate_and_keep_their_category(sdsscore):
     targets = _real_targets(_exposure())
     assert set(targets) == set(EXPECTED)
     for fiber_id, (category, on_target) in EXPECTED.items():
         target = targets[fiber_id]
-        # Not relabeled (e.g. to "science"): the category is kept verbatim.
-        assert target.category == category
         assert target.on_target is on_target
+        assert _reported_category(target) == category
+        if on_target:
+            # Never relabeled (e.g. to "science"): the category is kept verbatim.
+            assert target.category == category
+        else:
+            # Off-target fibers keep their category too, unless off-target
+            # relabeling is in place, in which case they become "offtarget",
+            # exactly like an off-target science fiber.
+            assert target.category in (category, "offtarget")
 
 
 def test_veto_location_rows_carry_catalog_identity(sdsscore):
     targets = _real_targets(_exposure())
-    veto = [t for t in targets.values() if t.category in VETO_CATEGORIES]
+    veto = [t for t in targets.values() if _reported_category(t) in VETO_CATEGORIES]
     assert len(veto) == 6
     for target in veto:
         assert target.assigned
@@ -101,7 +115,7 @@ def test_veto_location_rows_carry_catalog_identity(sdsscore):
 def test_veto_location_rows_are_eligible_for_sdss_id_cross_match(sdsscore):
     targets = _real_targets(_exposure())
     for target in targets.values():
-        if target.category in VETO_CATEGORIES or target.category == "standard_apogee":
+        if target.on_target and target.category in VETO_CATEGORIES + ("standard_apogee",):
             assert target.expected_to_be_assigned_sdss_id
             # These are v1 catalogids, so the cross-match goes straight
             # through SDSS_ID_flat on catalogid, as for science targets.
@@ -178,8 +192,16 @@ def test_veto_location_fibers_are_included_in_star_list(sdsscore, tmp_path):
 
     stars = Table.read(output_path, format="ascii.csv")
     listed = set(stars["sdss_id"])
-    for fiber_id, (category, _) in EXPECTED.items():
-        if category in VETO_CATEGORIES or category == "standard_apogee":
+    for fiber_id, (category, on_target) in EXPECTED.items():
+        target = targets[fiber_id]
+        if category == "sky_apogee":
+            assert 1000 + fiber_id not in listed, (fiber_id, category)
+        elif on_target or target.category != "offtarget":
+            # Veto-location fibers are listed exactly like science fibers
+            # (and like the standard_apogee fiber here).
             assert 1000 + fiber_id in listed, (fiber_id, category)
         else:
+            # With off-target relabeling in place, an off-target veto-location
+            # fiber has no sdss_id and is not listed, like an off-target
+            # science fiber.
             assert 1000 + fiber_id not in listed, (fiber_id, category)
