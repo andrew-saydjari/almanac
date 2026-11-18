@@ -23,7 +23,7 @@ TABLE = "catalogdb.mv_apogee_id_to_sdss_id"
 APO = [
     "08381883+6849289", "01480412+1247028", "03002278+0028365", "22441193-0057124",
     "16021298-2520379", "03562000+1737276", "09511766+0233127", "16493809-1916446",
-    "02164476+5246504", "15031997+3201520",
+    "13105218+3306541", "15031997+3201520",
 ]
 LCO = [
     "07201390-6342433", "12294594-6617036", "18013868-2649154", "18101143-1440451",
@@ -35,6 +35,8 @@ LCO = [
 # separate sdss_ids at the same position. Which one a fiber gets depends on
 # row order in both paths, so only the row sets are compared for it.
 AMBIGUOUS = ["00451807+4047096"]
+# Matched by the 2MASS fallback in almanac, not by allStar: in neither path.
+NOT_IN_ALLSTAR = ["02164476+5246504"]
 NO_MATCH = ["00000000+0000000"]
 
 
@@ -74,7 +76,7 @@ def test_table_is_nonempty_and_indexed(apogee):
 
 
 def test_same_rows_as_live_join(apogee):
-    candidates = _candidates(apogee, APO + LCO + AMBIGUOUS + NO_MATCH)
+    candidates = _candidates(apogee, APO + LCO + AMBIGUOUS + NO_MATCH + NOT_IN_ALLSTAR)
     table = _row_sets(apogee._query_apogee_id_rows_from_view(TABLE, candidates))
     join = _row_sets(apogee._query_apogee_id_rows(candidates))
     assert table == join
@@ -82,11 +84,12 @@ def test_same_rows_as_live_join(apogee):
 
 
 def test_same_sdss_id_as_live_join(apogee):
-    identifiers = APO + LCO + NO_MATCH
+    identifiers = APO + LCO + NO_MATCH + NOT_IN_ALLSTAR
     candidates = _candidates(apogee, identifiers)
     table = apogee._add_apogee_id_rows({}, apogee._query_apogee_id_rows_from_view(TABLE, candidates))
     join = apogee._add_apogee_id_rows({}, apogee._query_apogee_id_rows(candidates))
     for identifier in APO + LCO:
         assert identifier in table, identifier
         assert table[identifier] == join[identifier] > 0, identifier
-    assert NO_MATCH[0] not in table and NO_MATCH[0] not in join
+    for identifier in NO_MATCH + NOT_IN_ALLSTAR:
+        assert identifier not in table and identifier not in join
