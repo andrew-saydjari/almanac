@@ -83,8 +83,15 @@ def any_plate_era(tasks) -> bool:
 
 def _add_apogee_id_rows(lookup: Dict[str, int], rows) -> Dict[str, int]:
     """
-    Add (sdss_id, apogee_id) rows to an APOGEE ID -> SDSS ID lookup, in row
-    order (a later row overwrites an earlier one for the same key).
+    Add (sdss_id, apogee_id) rows to an APOGEE ID -> SDSS ID lookup.
+
+    When several rows give the same key, the LARGEST sdss_id wins (AKS
+    2026-11-18: "order by sdss_id and take the larger value"), so the result
+    does not depend on the order in which the database returns rows and is
+    the same for the lookup table and the live join. Such ties exist because
+    `sdss_id_flat.rank` only orders the sdss_ids of one catalogid; one star
+    can have two catalogids (e.g. one per allStar field) with a rank-1
+    sdss_id each (64 allStar apogee_ids as of 2026-11-18).
 
     Each apogee_id is stored as-is, and also with a leading "2M", "J" or "AP"
     stripped, so that a 2MASS-style designation with its prefix removed (see
@@ -95,10 +102,29 @@ def _add_apogee_id_rows(lookup: Dict[str, int], rows) -> Dict[str, int]:
             # There is one problematic entry of "AP" which caused 180,000
             # fiber-exposures to be assigned to sdss_id 57991461
             continue
-        lookup[apogee_id] = sdss_id
+        _keep_larger(lookup, apogee_id, sdss_id)
         for prefix in APOGEE_ID_PREFIXES:
             if apogee_id.startswith(prefix):
-                lookup[apogee_id[len(prefix):]] = sdss_id
+                _keep_larger(lookup, apogee_id[len(prefix):], sdss_id)
+    return lookup
+
+
+def _keep_larger(lookup: Dict[Any, int], key, sdss_id: int) -> None:
+    """Store `sdss_id` under `key` unless a larger sdss_id is already there."""
+    current = lookup.get(key)
+    if current is None or sdss_id > current:
+        lookup[key] = sdss_id
+
+
+def identifier_lookup(rows) -> Dict[Any, int]:
+    """
+    {identifier: sdss_id} from (identifier, sdss_id) rows; when an
+    identifier has several sdss_id, the largest wins (same rule as
+    `_add_apogee_id_rows`).
+    """
+    lookup: Dict[Any, int] = {}
+    for identifier, sdss_id in rows:
+        _keep_larger(lookup, identifier, sdss_id)
     return lookup
 
 
@@ -310,10 +336,12 @@ def parse_view_refresh_date(comment: Optional[str]):
 
 def check_view_staleness(refreshed, table_stats) -> List[str]:
     """
-    Heuristic client-side staleness check of the materialized view.
+    Client-side staleness check of the lookup table / materialized view.
+    Silent unless there is positive evidence of a problem.
 
     :param refreshed:
-        The view's last-refresh `date` (from its comment), or None.
+        The view's last-refresh `date` (from a "Last refreshed: YYYY-MM-DD"
+        comment), or None.
     :param table_stats:
         Rows of (table, last_analyze, last_autoanalyze, n_mod_since_analyze)
         from `pg_stat_all_tables` for the source tables.
@@ -321,46 +349,29 @@ def check_view_staleness(refreshed, table_stats) -> List[str]:
     :returns:
         Warning messages (empty if no sign of staleness).
 
-    A data change to a source table increments its `n_mod_since_analyze`
-    until the next (auto)analyze. So any change made after the refresh shows
-    up either as `n_mod_since_analyze > 0` now, or as a last (auto)analyze on
-    or after the refresh date. Neither can be missed unless the server's
-    statistics were reset (crash recovery, `pg_stat_reset`), in which case
-    the timestamps are NULL and a warning is also given. It can give false
-    alarms: a maintenance ANALYZE with no data change, or an analyze on the
-    refresh day itself (the comment only carries a date), also warn.
+    The only warning: a source table was (auto)analyzed on a day AFTER the
+    refresh date, i.e. it was very likely changed after the snapshot was
+    built. Nothing is reported when the date is unknown (no comment; AKS
+    2026-11-18: "just remove the warning"), when statistics are missing, or
+    for unanalyzed modifications (`n_mod_since_analyze`), since none of
+    those is evidence that the snapshot is out of date. The direct evidence,
+    an identifier the table misses but the live join matches, is still
+    logged as a WARNING by `_targeted_batch`.
     """
     warnings = []
     if refreshed is None:
-        warnings.append(
-            "view comment has no 'Last refreshed: YYYY-MM-DD' date; "
-            "cannot check whether the view is current"
-        )
-    seen = set()
+        return warnings
     for table, last_analyze, last_autoanalyze, n_mod in table_stats:
-        seen.add(table)
-        if n_mod:
-            warnings.append(
-                f"{table} has {n_mod} row modifications not yet analyzed: "
-                "it changed at an unknown time, possibly after the view's refresh"
-            )
         stamps = [t for t in (last_analyze, last_autoanalyze) if t is not None]
         if not stamps:
-            warnings.append(
-                f"{table} has no analyze timestamp (statistics reset?); "
-                "cannot check it against the view's refresh date"
-            )
             continue
         latest = max(stamps)
         latest_date = latest.date() if hasattr(latest, "date") else latest
-        if refreshed is not None and latest_date >= refreshed:
+        if latest_date > refreshed:
             warnings.append(
-                f"{table} was analyzed on {latest_date}, on or after the view's "
-                f"last refresh ({refreshed}): it may have changed since"
+                f"{table} was analyzed on {latest_date}, after the view's "
+                f"last refresh ({refreshed}): it has probably changed since"
             )
-    for table in APOGEE_ID_VIEW_SOURCE_TABLES:
-        if table.split(".", 1)[1] not in seen and table not in seen:
-            warnings.append(f"no statistics readable for {table}")
     return warnings
 
 
@@ -601,8 +612,8 @@ def get_apogee_id_lookup(
     apogee_id that can produce the key (the identifier, or the identifier
     with "2M", "J" or "AP" prepended) is fetched in the same query, and the
     rows are folded with the same rules (bad short entries such as "AP" are
-    skipped; when several rows give the same key, the last row returned by
-    the database wins, as in the full lookup).
+    skipped; when several rows give the same key, the largest sdss_id
+    wins, as in the full lookup).
 
     The returned dictionary is the process-wide memo; callers must not
     mutate it. Only requested identifiers are guaranteed to be present.
@@ -1089,9 +1100,9 @@ def get_almanac_data(
                     )
                     .tuples()
                 )
-                lookup["catalogid"] = {}
-                for sdss_id, catalogid in _execute_query(q):
-                    lookup["catalogid"][catalogid] = sdss_id
+                lookup["catalogid"] = identifier_lookup(
+                    (catalogid, sdss_id) for sdss_id, catalogid in _execute_query(q)
+                )
 
             if "gaia_dr2" in identifiers and is_database_available:
                 q = (
@@ -1112,9 +1123,10 @@ def get_almanac_data(
                     )
                     .tuples()
                 )
-                lookup["gaia_dr2"] = {}
-                for sdss_id, gaia_dr2_source_id in _execute_query(q):
-                    lookup["gaia_dr2"][gaia_dr2_source_id] = sdss_id
+                lookup["gaia_dr2"] = identifier_lookup(
+                    (gaia_dr2_source_id, sdss_id)
+                    for sdss_id, gaia_dr2_source_id in _execute_query(q)
+                )
 
 
             if "coordinate" in identifiers and is_database_available:
@@ -1151,7 +1163,7 @@ def get_almanac_data(
                         )
                         .tuples()
                     )
-                    lookup["twomass_psc"] = { d: s for d, s in _execute_query(q) }
+                    lookup["twomass_psc"] = identifier_lookup(_execute_query(q))
 
             # Add sdss_id to targets
             for si, ei in sequences["objects"]:

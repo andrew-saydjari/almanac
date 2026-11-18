@@ -144,6 +144,19 @@ class TestViewPresent:
         assert lookup
 
 
+class TestTieBreakSameOnBothPaths:
+    def test_view_rows_reversed_equal_join(self, env, monkeypatch):
+        # The table and the live join may return tied rows in different
+        # orders; the larger sdss_id wins on both paths.
+        join, view = env(view_rows=_distinct(ROWS)[::-1])
+        from_view = dict(get_apogee_id_lookup(ALL_IDENTIFIERS))
+        apogee.clear_targeted_apogee_id_lookup()
+        apogee.force_live_apogee_id_join(True)
+        from_join = dict(get_apogee_id_lookup(ALL_IDENTIFIERS))
+        assert from_view == from_join
+        assert from_view["00000005+0000005"] == 106
+
+
 class TestViewAbsentFallback:
     def test_absent_view_uses_join(self, env, caplog):
         join, view = env(exists=False)
@@ -263,22 +276,34 @@ class TestStaleness:
         assert len(w) == 3  # three tables analyzed on/after 11-10
         assert any("sdss_id_flat" in m for m in w)
 
-    def test_unanalyzed_modifications(self):
+    def test_analyzed_on_refresh_day_is_silent(self):
+        # Maintainers ANALYZE right after a rebuild: same day is not stale.
+        assert check_view_staleness(date(2026, 11, 16), FRESH_STATS) == []
+
+    def test_unanalyzed_modifications_are_silent(self):
         stats = list(FRESH_STATS)
         stats[0] = ("catalogdb.sdss_id_flat", datetime(2026, 11, 15), None, 7138)
-        w = check_view_staleness(date(2026, 12, 1), stats)
-        assert len(w) == 1 and "7138" in w[0]
+        assert check_view_staleness(date(2026, 12, 1), stats) == []
 
-    def test_no_date_and_reset_stats(self):
+    def test_no_refresh_date_is_silent(self):
+        # AKS 2026-11-18: no warning for a missing "Last refreshed" comment
+        # (the maintainers' table has none), even with reset statistics.
         stats = list(FRESH_STATS)
         stats[3] = ("catalogdb.allstar_dr17_synspec_rev1", None, None, 0)
-        w = check_view_staleness(None, stats)
-        assert any("no 'Last refreshed" in m for m in w)
-        assert any("statistics reset" in m for m in w)
+        assert check_view_staleness(None, stats) == []
+        assert check_view_staleness(None, FRESH_STATS) == []
 
-    def test_missing_stats_row(self):
-        w = check_view_staleness(date(2026, 12, 1), FRESH_STATS[:3])
-        assert w == ["no statistics readable for catalogdb.allstar_dr17_synspec_rev1"]
+    def test_missing_stats_row_is_silent(self):
+        assert check_view_staleness(date(2026, 12, 1), FRESH_STATS[:3]) == []
+
+    def test_no_comment_resolves_without_warning(self, env, caplog):
+        env(comment=None)
+        with caplog.at_level(logging.WARNING):
+            source = resolve_apogee_id_source()
+        assert source["source"] == SOURCE_VIEW
+        assert source["staleness_warnings"] == []
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+        assert apogee_id_source_attrs(source)["apogee_id_lookup_view_kind"] == "table"
 
     def test_stale_view_still_used_but_warned(self, env, caplog):
         env(comment="Last refreshed: 2026-10-01")

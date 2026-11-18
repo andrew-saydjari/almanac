@@ -76,8 +76,11 @@ almanac queries only the APOGEE IDs each night needs (in batches, memoised per
 process). If the lookup relation named by the config key
 `apogee_id_lookup_view` (default `catalogdb.mv_apogee_id_to_sdss_id`) exists,
 is readable and is not empty, it is read instead of the four-table join; its
-"Last refreshed: YYYY-MM-DD" comment is logged, signs of staleness are logged
-as warnings, and identifiers the view misses are retried with the live join.
+"Last refreshed: YYYY-MM-DD" comment, if any, is logged; a warning is logged only
+if a source table was analyzed after that date, and identifiers the view misses are retried with the live join (a match found
+that way is logged as a warning that the table is stale). When an identifier
+has several sdss_id (several catalogids, each with a rank-1 sdss_id), the
+largest sdss_id is used, on every path.
 Each night's HDF5 group records the source used in its
 `apogee_id_lookup_*` attributes (`apogee_id_lookup_view_kind` says whether
 the relation is a table or a materialized view; the source value stays
