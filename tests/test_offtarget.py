@@ -74,7 +74,10 @@ class TestOffTargetRelabel:
         assert target.sdss_id == 85604486
 
     @pytest.mark.parametrize(
-        "category", ("science", "standard_apogee", "standard_boss", "open_fiber", "bonus")
+        "category", (
+            "science", "veto_location_boss", "veto_location_apogee",
+            "standard_apogee", "standard_boss", "open_fiber", "bonus",
+        )
     )
     def test_all_target_asserting_categories_are_relabeled(self, category):
         target = fps_target(category=category, on_target=0)
@@ -193,7 +196,10 @@ class TestTask94Fiber:
 
 class TestCategoryHelpers:
     @pytest.mark.parametrize(
-        "category", ("science", "standard_apogee", "standard_boss", "open_fiber", "bonus")
+        "category", (
+            "science", "veto_location_boss", "veto_location_apogee",
+            "standard_apogee", "standard_boss", "open_fiber", "bonus",
+        )
     )
     def test_target_asserting_categories(self, category):
         assert asserts_target_identity(category)

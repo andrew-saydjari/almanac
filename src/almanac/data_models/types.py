@@ -71,6 +71,15 @@ Category = Annotated[
         "",
         "bonus",
         "science",
+        # Stars observed at "veto locations" of manually built FPS designs: an
+        # APOGEE fiber placed on a Gaia bright-neighbor star
+        # (`veto_location_boss`, carton `ops_gaia_brightneighbors`) or on a
+        # bright 2MASS star (`veto_location_apogee`, carton
+        # `ops_2mass_psc_brightneighbors`). They are assigned real catalog
+        # targets, so they are treated like `science` (cross-matched to an
+        # `sdss_id`, see also `IDENTIFIED_STAR_CATEGORIES`) but keep their names.
+        "veto_location_boss",
+        "veto_location_apogee",
         "sky_apogee",
         "sky_boss",
         "standard_apogee",
@@ -93,7 +102,10 @@ def asserts_target_identity(category: str) -> bool:
 
     Sky fibers, unplugged fibers, fibers with no category, and fibers already
     marked as off-target make no such assertion, so they are not candidates for
-    the off-target relabeling.
+    the off-target relabeling. Every other category does, including
+    `veto_location_boss` and `veto_location_apogee`: like `science`, an
+    on-target one keeps its name and is cross-matched, and an assigned but
+    off-target one becomes `offtarget` with no `sdss_id`.
 
     :param category:
         The target category (e.g. "science").
@@ -171,3 +183,17 @@ ObjType = Annotated[
     ],
     BeforeValidator(validate_str)
 ]
+
+#: Categories whose fiber carries an identified star: the target has a catalog
+#: identity, and the fiber is expected to have collected that star's light. These
+#: are the fibers that go into star-level summaries (`almanac dump stars`). The
+#: veto-location categories are included alongside `science`: they are real stars
+#: with catalog identifiers, observed exactly like science targets.
+IDENTIFIED_STAR_CATEGORIES = (
+    "science",
+    "veto_location_boss",
+    "veto_location_apogee",
+    "standard_apogee",
+    "standard_boss",
+    "open_fiber",
+)
