@@ -73,13 +73,19 @@ Skip cross-matching targets with SDSS database.
 Fibers identified only by an old (pre-v1) catalogid or a 2MASS-style
 designation are cross-matched through DR17 allStar `apogee_id`. By default
 almanac queries only the APOGEE IDs each night needs (in batches, memoised per
-process). If the materialized view named by the config key
+process). If the lookup relation named by the config key
 `apogee_id_lookup_view` (default `catalogdb.mv_apogee_id_to_sdss_id`) exists,
 is readable and is not empty, it is read instead of the four-table join; its
 "Last refreshed: YYYY-MM-DD" comment is logged, signs of staleness are logged
 as warnings, and identifiers the view misses are retried with the live join.
 Each night's HDF5 group records the source used in its
-`apogee_id_lookup_*` attributes. The view is a snapshot and must be refreshed
+`apogee_id_lookup_*` attributes (`apogee_id_lookup_view_kind` says whether
+the relation is a table or a materialized view; the source value stays
+`materialized_view` for either). The database maintainers built
+`catalogdb.mv_apogee_id_to_sdss_id` on 2026-11-18 as an ordinary table
+(sdssdb model `catalogdb.MvApogeeIdToSdssId`, sdssdb main e7d71cb; almanac
+reads it with SQL, so no sdssdb upgrade is needed). It is listed in
+`almanac pgdump`. The table is a snapshot and must be rebuilt
 whenever `sdss_id_flat`, `sdss_id_to_catalog`,
 `catalog_to_allstar_dr17_synspec_rev1` or `allstar_dr17_synspec_rev1` is
 updated.

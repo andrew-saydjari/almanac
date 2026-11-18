@@ -56,11 +56,13 @@ class FakeView:
         return [row for row in self.rows if row[1] in wanted]
 
 
-def _probe(exists=True, readable=True, nonempty=True, comment=COMMENT, stats=FRESH_STATS):
+def _probe(exists=True, readable=True, nonempty=True, comment=COMMENT, stats=FRESH_STATS,
+           kind="table"):
     def probe(view):
         assert view == VIEW
         return dict(
             exists=exists, readable=readable and exists, nonempty=nonempty and exists,
+            kind=kind if exists else "",
             comment=comment if exists else None,
             refreshed=parse_view_refresh_date(comment) if exists else None,
             table_stats=stats if exists else [],
@@ -125,7 +127,21 @@ class TestViewPresent:
         with caplog.at_level(logging.INFO):
             resolve_apogee_id_source()
         assert "Last refreshed: 2026-12-01" in caplog.text
-        assert "materialized view" in caplog.text
+        assert f"reading {VIEW} (table;" in caplog.text
+
+    @pytest.mark.parametrize("kind", ["table", "materialized view"])
+    def test_table_or_materialized_view_both_used(self, env, kind, caplog):
+        # The maintainers delivered mv_apogee_id_to_sdss_id as an ordinary
+        # table; a real materialized view must work the same way.
+        join, view = env(kind=kind)
+        with caplog.at_level(logging.INFO):
+            source = resolve_apogee_id_source()
+            lookup = get_apogee_id_lookup(ALL_IDENTIFIERS)
+        assert source["source"] == SOURCE_VIEW
+        assert source["view_kind"] == kind
+        assert f"({kind};" in caplog.text
+        assert view.calls
+        assert lookup
 
 
 class TestViewAbsentFallback:
@@ -281,6 +297,7 @@ class TestOutputAttrs:
         assert attrs["apogee_id_lookup_source"] == SOURCE_VIEW
         assert attrs["apogee_id_lookup_mode"] == "targeted"
         assert attrs["apogee_id_lookup_view"] == VIEW
+        assert attrs["apogee_id_lookup_view_kind"] == "table"
         assert attrs["apogee_id_lookup_view_last_refreshed"] == "2026-12-01"
         assert attrs["apogee_id_lookup_staleness_warnings"] == ""
         assert all(isinstance(v, str) for v in attrs.values())
@@ -291,6 +308,7 @@ class TestOutputAttrs:
         assert attrs["apogee_id_lookup_source"] == SOURCE_LIVE_JOIN
         assert attrs["apogee_id_lookup_mode"] == "full"
         assert attrs["apogee_id_lookup_view"] == ""
+        assert attrs["apogee_id_lookup_view_kind"] == ""
         assert "does not exist" in attrs["apogee_id_lookup_note"]
 
     def test_none(self):
@@ -316,6 +334,14 @@ class TestViewSQL:
         )
         assert calls[1] == ('SELECT sdss_id, apogee_id FROM "catalogdb"."mv_apogee_id_to_sdss_id"', None)
 
+    @pytest.mark.parametrize("relkind, kind", [("r", "table"), ("m", "materialized view"), ("v", "view"), ("x", "x"), (None, "")])
+    def test_probe_kind(self, monkeypatch, relkind, kind):
+        responses = iter([[(VIEW, )], [(True, None, relkind)], [(1, )], []])
+        monkeypatch.setattr(apogee, "_execute_sql", lambda sql, params=None: next(responses))
+        info = apogee._probe_view(VIEW)
+        assert info["kind"] == kind
+        assert info["comment"] is None and info["refreshed"] is None
+
     def test_probe_absent(self, monkeypatch):
         responses = iter([[(None, )]])
         monkeypatch.setattr(apogee, "_execute_sql", lambda sql, params=None: next(responses))
@@ -325,7 +351,7 @@ class TestViewSQL:
     def test_probe_present(self, monkeypatch):
         responses = iter([
             [(VIEW, )],
-            [(True, COMMENT)],
+            [(True, COMMENT, "r")],
             [(1, )],
             FRESH_STATS,
         ])
@@ -334,5 +360,6 @@ class TestViewSQL:
         info = apogee._probe_view(VIEW)
         assert info["exists"] and info["readable"] and info["nonempty"]
         assert info["refreshed"] == date(2026, 12, 1)
+        assert info["kind"] == "table"
         assert info["table_stats"] == FRESH_STATS
         assert "to_regclass" in sqls[0] and "pg_stat_all_tables" in sqls[3]

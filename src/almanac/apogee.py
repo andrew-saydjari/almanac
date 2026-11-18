@@ -230,6 +230,11 @@ def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tu
 # check is run (WARNING only), and the chosen source is recorded in the
 # output (see `apogee_id_source_attrs`). If the view is absent, unreadable or
 # empty, the live join is used and nothing fails.
+#
+# The maintainers delivered `catalogdb.mv_apogee_id_to_sdss_id` on 2026-11-18
+# as an ordinary table (not a materialized view; sdssdb model
+# `catalogdb.MvApogeeIdToSdssId`, sdssdb main e7d71cb). Either kind is read
+# the same way; "view" below means whichever relation is configured.
 # ---------------------------------------------------------------------------
 
 # Source tables the view is a snapshot of.
@@ -359,23 +364,41 @@ def check_view_staleness(refreshed, table_stats) -> List[str]:
     return warnings
 
 
+# pg_class.relkind -> name, for logging what kind of relation the lookup is.
+RELKIND_NAMES = {
+    "r": "table",
+    "m": "materialized view",
+    "v": "view",
+    "p": "partitioned table",
+    "f": "foreign table",
+}
+
+
 def _probe_view(view: str) -> Dict[str, Any]:
     """
     Read-only catalog checks for the view. Returns a dict with keys
-    exists, readable, nonempty, comment, refreshed, table_stats.
+    exists, readable, nonempty, kind, comment, refreshed, table_stats.
+
+    `kind` is what the relation is ("table", "materialized view", "view",
+    ...; "" if absent). The database maintainers delivered
+    `catalogdb.mv_apogee_id_to_sdss_id` (2026-11-18) as an ordinary table
+    despite its `mv_` prefix; any relation with `apogee_id` and `sdss_id`
+    columns works, and the kind is only logged and recorded.
     """
     quoted = _quote_view_name(view)
-    info = dict(exists=False, readable=False, nonempty=False, comment=None,
+    info = dict(exists=False, readable=False, nonempty=False, kind="", comment=None,
                 refreshed=None, table_stats=[])
     ((regclass, ), ) = _execute_sql("SELECT to_regclass(%s)::text", (view, ))
     if regclass is None:
         return info
     info["exists"] = True
-    ((readable, comment), ) = _execute_sql(
+    ((readable, comment, relkind), ) = _execute_sql(
         "SELECT has_table_privilege(to_regclass(%s), 'SELECT'), "
-        "obj_description(to_regclass(%s), 'pg_class')",
-        (view, view)
+        "obj_description(to_regclass(%s), 'pg_class'), "
+        "(SELECT relkind::text FROM pg_class WHERE oid = to_regclass(%s))",
+        (view, view, view)
     )
+    info["kind"] = RELKIND_NAMES.get(relkind, relkind or "")
     info["readable"] = bool(readable)
     info["comment"] = comment
     info["refreshed"] = parse_view_refresh_date(comment)
@@ -412,7 +435,7 @@ def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str
         return _APOGEE_ID_SOURCE
 
     view = (getattr(config, "apogee_id_lookup_view", "") or "").strip()
-    source = dict(source=SOURCE_LIVE_JOIN, view=view, view_comment="",
+    source = dict(source=SOURCE_LIVE_JOIN, view=view, view_kind="", view_comment="",
                   view_last_refreshed="", reason="", staleness_warnings=[])
 
     if _FORCE_LIVE_APOGEE_ID_JOIN:
@@ -426,6 +449,7 @@ def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str
             source["reason"] = f"could not probe view {view}: {e}"
             logger.warning(f"APOGEE ID lookup: {source['reason']}; using the live join")
         else:
+            source["view_kind"] = info.get("kind") or ""
             source["view_comment"] = info["comment"] or ""
             source["view_last_refreshed"] = (
                 info["refreshed"].isoformat() if info["refreshed"] else ""
@@ -441,8 +465,8 @@ def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str
             else:
                 source["source"] = SOURCE_VIEW
                 logger.info(
-                    f"APOGEE ID lookup: reading materialized view {view} "
-                    f"(last refreshed: {source['view_last_refreshed'] or 'UNKNOWN'}; "
+                    f"APOGEE ID lookup: reading {view} "
+                    f"({source['view_kind'] or 'relation of unknown kind'}; last refreshed: {source['view_last_refreshed'] or 'UNKNOWN'}; "
                     f"comment: {source['view_comment']!r})"
                 )
                 try:
@@ -472,6 +496,9 @@ def apogee_id_source_attrs(source: Optional[Dict[str, Any]], full: bool = False)
         "apogee_id_lookup_source": source["source"],
         "apogee_id_lookup_mode": "full" if full else "targeted",
         "apogee_id_lookup_view": source["view"] if source["source"] == SOURCE_VIEW else "",
+        "apogee_id_lookup_view_kind": (
+            source.get("view_kind", "") if source["source"] == SOURCE_VIEW else ""
+        ),
         "apogee_id_lookup_view_last_refreshed": (
             source["view_last_refreshed"] if source["source"] == SOURCE_VIEW else ""
         ),

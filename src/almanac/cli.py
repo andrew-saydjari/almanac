@@ -1337,6 +1337,10 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
         click.echo(f"Warning: missing field {key}")
 
 PGDUMP_TABLES = (
+    # APOGEE ID -> sdss_id lookup table built by the database maintainers
+    # (read by `almanac.apogee` when present; see `apogee_id_lookup_view`).
+    # Without it a restored copy falls back to the live four-table join.
+    "catalogdb.mv_apogee_id_to_sdss_id",
     "catalogdb.sdss_id_flat",
     "catalogdb.sdss_id_to_catalog",
     "catalogdb.catalog",
