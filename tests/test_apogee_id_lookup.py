@@ -54,22 +54,21 @@ class TestPoolInitializer:
         _pool_initializer(lookup)
         assert apogee.APOGEE_ID_LOOKUP is lookup
 
-    def test_without_lookup_leaves_lazy_fallback(self):
+    def test_without_lookup_uses_targeted_queries(self):
         apogee.APOGEE_ID_LOOKUP = None
         _pool_initializer()
-        # No lookup shipped: the worker keeps the lazy build-on-first-use
-        # fallback (global stays None until create_apogee_id_lookup runs).
+        # No full lookup shipped: the worker queries only the APOGEE IDs its
+        # nights need (see test_targeted_apogee_id_lookup.py).
         assert apogee.APOGEE_ID_LOOKUP is None
 
-    def test_worker_with_lookup_does_not_rebuild(self, monkeypatch):
-        lookup = {"2M11111111+1111111": 7}
+    def test_worker_with_lookup_does_not_query(self, monkeypatch):
+        lookup = {"11111111+1111111": 7}
         _pool_initializer(lookup)
 
-        def _fail():
-            raise AssertionError("worker should not rebuild the lookup")
+        def _fail(*args, **kwargs):
+            raise AssertionError("worker should not query the database")
 
         monkeypatch.setattr(apogee, "create_apogee_id_lookup", _fail)
-        # The guard used inside get_almanac_data:
-        if apogee.APOGEE_ID_LOOKUP is None:
-            apogee.create_apogee_id_lookup()
-        assert apogee.APOGEE_ID_LOOKUP is lookup
+        monkeypatch.setattr(apogee, "_query_apogee_id_rows", _fail)
+        # The call used inside get_almanac_data:
+        assert apogee.get_apogee_id_lookup(["11111111+1111111"]) is lookup

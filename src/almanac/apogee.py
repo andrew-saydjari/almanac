@@ -4,7 +4,7 @@ from glob import glob
 from subprocess import check_output
 from astropy.table import Table, hstack, unique
 from itertools import groupby
-from typing import Optional, Tuple, Dict, List, Set, Generator, Any, Union
+from typing import Optional, Tuple, Dict, List, Set, Generator, Any, Union, Sequence
 
 from scipy.spatial.distance import cdist
 
@@ -14,7 +14,25 @@ from almanac.data_models.types import ImageType, assigns_sdss_id
 from almanac.data_models.utils import mjd_to_exposure_prefix, get_exposure_path
 
 
+# Full APOGEE ID -> SDSS ID lookup (every DR17 allStar apogee_id), installed
+# only when explicitly requested (`almanac --full-apogee-id-lookup`, via
+# `set_apogee_id_lookup`). When it is None, lookups are targeted: only the
+# identifiers a night needs are queried, and the answers are memoised in
+# `_TARGETED_APOGEE_ID_LOOKUP` for the life of the process.
 APOGEE_ID_LOOKUP = None
+
+# Process-local memo for targeted lookups: identifier -> sdss_id for every
+# identifier that resolved, and the set of identifiers already queried
+# (hits and misses) so that a repeated identifier is never re-queried.
+_TARGETED_APOGEE_ID_LOOKUP: Dict[str, int] = {}
+_TARGETED_APOGEE_ID_QUERIED: Set[str] = set()
+
+# Prefixes stripped from an allStar apogee_id to form an extra lookup key.
+APOGEE_ID_PREFIXES = ("2M", "J", "AP")
+
+# Number of identifiers per targeted query (each identifier expands to
+# 1 + len(APOGEE_ID_PREFIXES) candidate apogee_id values in the IN list).
+APOGEE_ID_QUERY_BATCH_SIZE = 1000
 
 
 def _execute_query(q) -> List[Tuple]:
@@ -31,20 +49,26 @@ def _execute_query(q) -> List[Tuple]:
     return _fetch()
 
 
-def set_apogee_id_lookup(lookup: Dict[str, int]) -> None:
+def set_apogee_id_lookup(lookup: Optional[Dict[str, int]]) -> None:
     """
-    Install a pre-built APOGEE ID -> SDSS ID lookup for this process.
+    Install a pre-built, FULL APOGEE ID -> SDSS ID lookup for this process.
 
-    The lookup is built by `create_apogee_id_lookup` from a heavy database
-    query (~10 s, ~1.3M entries, ~33 MB pickled) and is only needed for
-    plate-era "coordinate" target identifiers. When running with a process
-    pool, the parent builds it once and installs it in each worker via the
-    pool initializer, instead of every worker independently re-querying the
-    database. Any process without an installed lookup falls back to building
-    its own on first use.
+    The full lookup is built by `create_apogee_id_lookup` from a heavy
+    database query over every DR17 allStar apogee_id (~734k rows; 11-40 min
+    warm, hours with a cold database cache). It is only used when explicitly
+    requested (`almanac --full-apogee-id-lookup`): the parent builds it once
+    and installs it in each pool worker via the pool initializer. When no
+    full lookup is installed, `get_apogee_id_lookup` queries only the
+    identifiers that are needed.
     """
     global APOGEE_ID_LOOKUP
     APOGEE_ID_LOOKUP = lookup
+
+
+def clear_targeted_apogee_id_lookup() -> None:
+    """Forget all memoised targeted APOGEE ID lookups in this process."""
+    _TARGETED_APOGEE_ID_LOOKUP.clear()
+    _TARGETED_APOGEE_ID_QUERIED.clear()
 
 
 def any_plate_era(tasks) -> bool:
@@ -57,28 +81,51 @@ def any_plate_era(tasks) -> bool:
     return any(mjd < FPS_ERA_START_MJD[observatory] for mjd, observatory in tasks)
 
 
-def create_apogee_id_lookup() -> Dict[str, int]:
+def _add_apogee_id_rows(lookup: Dict[str, int], rows) -> Dict[str, int]:
     """
-    Create a lookup dictionary mapping APOGEE IDs to SDSS IDs.
-    """
-    global APOGEE_ID_LOOKUP
-    """
-    import pickle
-    with open("apogee_id_lookup.pkl", "rb") as f:
-        foo = pickle.load(f)
-    APOGEE_ID_LOOKUP = {}
-    for key, value in foo.items():
-        APOGEE_ID_LOOKUP[key] = value
-        for prefix in ("2M", "J", "AP"):
-            if key.startswith(prefix):
-                APOGEE_ID_LOOKUP[key[len(prefix):]] = value
+    Add (sdss_id, apogee_id) rows to an APOGEE ID -> SDSS ID lookup, in row
+    order (a later row overwrites an earlier one for the same key).
 
-    return APOGEE_ID_LOOKUP
+    Each apogee_id is stored as-is, and also with a leading "2M", "J" or "AP"
+    stripped, so that a 2MASS-style designation with its prefix removed (see
+    `parse_target_identifier`) finds it.
     """
+    for sdss_id, apogee_id in rows:
+        if len(apogee_id.strip()) <= 2:
+            # There is one problematic entry of "AP" which caused 180,000
+            # fiber-exposures to be assigned to sdss_id 57991461
+            continue
+        lookup[apogee_id] = sdss_id
+        for prefix in APOGEE_ID_PREFIXES:
+            if apogee_id.startswith(prefix):
+                lookup[apogee_id[len(prefix):]] = sdss_id
+    return lookup
 
-    from almanac.database import is_database_available, catalogdb
 
-    from peewee import (ForeignKeyField, BooleanField, FloatField, TextField, IntegerField)
+def apogee_id_candidates(identifier: str) -> Tuple[str, ...]:
+    """
+    Every allStar apogee_id that can produce the lookup key `identifier`
+    under `_add_apogee_id_rows`: the identifier itself, and the identifier
+    with each stripped prefix put back.
+    """
+    return (identifier, ) + tuple(f"{prefix}{identifier}" for prefix in APOGEE_ID_PREFIXES)
+
+
+def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str]]:
+    """
+    Query (sdss_id, apogee_id) rows linking DR17 allStar entries to SDSS IDs
+    (`sdss_id_flat.rank = 1` only).
+
+    :param apogee_ids:
+        If given, only rows whose allStar apogee_id is in this collection are
+        returned (the join is then driven from the small allStar side through
+        its apogee_id index, so the large sdss_id tables are only probed by
+        index for those rows). If None, every allStar entry is returned (the
+        full lookup).
+    """
+    from almanac.database import catalogdb
+
+    from peewee import (ForeignKeyField, BooleanField, FloatField, TextField)
 
     class CatalogToAllStar_DR17_synspec_rev1(catalogdb.CatalogdbModel):
         catalog = ForeignKeyField(catalogdb.Catalog,
@@ -99,48 +146,473 @@ def create_apogee_id_lookup() -> Dict[str, int]:
             primary_key = False
             use_reflection = False
 
-
-    q = (
-        catalogdb.SDSS_ID_flat
-        .select(
-            catalogdb.SDSS_ID_flat.sdss_id,
-            catalogdb.AllStar_DR17_synspec_rev1.apogee_id
-        )
-        .join(
-            catalogdb.SDSS_ID_To_Catalog,
-            on=(
-                catalogdb.SDSS_ID_flat.catalogid
-                == catalogdb.SDSS_ID_To_Catalog.catalogid
+    if apogee_ids is None:
+        q = (
+            catalogdb.SDSS_ID_flat
+            .select(
+                catalogdb.SDSS_ID_flat.sdss_id,
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id
             )
+            .join(
+                catalogdb.SDSS_ID_To_Catalog,
+                on=(
+                    catalogdb.SDSS_ID_flat.catalogid
+                    == catalogdb.SDSS_ID_To_Catalog.catalogid
+                )
+            )
+            .join(
+                CatalogToAllStar_DR17_synspec_rev1,
+                on=(
+                    catalogdb.SDSS_ID_To_Catalog.catalogid
+                    == CatalogToAllStar_DR17_synspec_rev1.catalogid
+                ),
+            )
+            .join(
+                catalogdb.AllStar_DR17_synspec_rev1,
+                on=(
+                    CatalogToAllStar_DR17_synspec_rev1.target_id
+                    == catalogdb.AllStar_DR17_synspec_rev1.apstar_id
+                ),
+            )
+            .where(catalogdb.SDSS_ID_flat.rank == 1)
+            .tuples()
         )
-        .join(
-            CatalogToAllStar_DR17_synspec_rev1,
-            on=(
-                catalogdb.SDSS_ID_To_Catalog.catalogid
-                == CatalogToAllStar_DR17_synspec_rev1.catalogid
-            ),
+    else:
+        # Same joins and filter as the full query, written from the allStar
+        # side and restricted to the requested apogee_id values.
+        q = (
+            catalogdb.AllStar_DR17_synspec_rev1
+            .select(
+                catalogdb.SDSS_ID_flat.sdss_id,
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id
+            )
+            .join(
+                CatalogToAllStar_DR17_synspec_rev1,
+                on=(
+                    CatalogToAllStar_DR17_synspec_rev1.target_id
+                    == catalogdb.AllStar_DR17_synspec_rev1.apstar_id
+                ),
+            )
+            .join(
+                catalogdb.SDSS_ID_To_Catalog,
+                on=(
+                    CatalogToAllStar_DR17_synspec_rev1.catalogid
+                    == catalogdb.SDSS_ID_To_Catalog.catalogid
+                ),
+            )
+            .join(
+                catalogdb.SDSS_ID_flat,
+                on=(
+                    catalogdb.SDSS_ID_To_Catalog.catalogid
+                    == catalogdb.SDSS_ID_flat.catalogid
+                ),
+            )
+            .where(
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id.in_(list(apogee_ids))
+            &   (catalogdb.SDSS_ID_flat.rank == 1)
+            )
+            .tuples()
         )
-        .join(
-            catalogdb.AllStar_DR17_synspec_rev1,
-            on=(
-                CatalogToAllStar_DR17_synspec_rev1.target_id
-                == catalogdb.AllStar_DR17_synspec_rev1.apstar_id
-            ),
+    return _execute_query(q)
+
+
+# ---------------------------------------------------------------------------
+# Lookup source: an optional materialized view, else the live join.
+#
+# If the database has a materialized view of (apogee_id, sdss_id) pairs (name
+# from `config.apogee_id_lookup_view`; default
+# "catalogdb.mv_apogee_id_to_sdss_id"), almanac reads it instead of running
+# the four-table join. The view is a snapshot: it is only correct if it was
+# refreshed after the last update of sdss_id_flat, sdss_id_to_catalog,
+# catalog_to_allstar_dr17_synspec_rev1 and allstar_dr17_synspec_rev1. The
+# source is resolved once per process (`resolve_apogee_id_source`), its
+# comment ("Last refreshed: YYYY-MM-DD") is logged, a heuristic staleness
+# check is run (WARNING only), and the chosen source is recorded in the
+# output (see `apogee_id_source_attrs`). If the view is absent, unreadable or
+# empty, the live join is used and nothing fails.
+# ---------------------------------------------------------------------------
+
+# Source tables the view is a snapshot of.
+APOGEE_ID_VIEW_SOURCE_TABLES = (
+    "catalogdb.sdss_id_flat",
+    "catalogdb.sdss_id_to_catalog",
+    "catalogdb.catalog_to_allstar_dr17_synspec_rev1",
+    "catalogdb.allstar_dr17_synspec_rev1",
+)
+
+SOURCE_VIEW = "materialized_view"
+SOURCE_LIVE_JOIN = "live_join"
+
+# Resolved once per process (or installed by the parent via
+# `set_apogee_id_source`); see `resolve_apogee_id_source`.
+_APOGEE_ID_SOURCE: Optional[Dict[str, Any]] = None
+_FORCE_LIVE_APOGEE_ID_JOIN = False
+
+_VIEW_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$"
+
+
+def force_live_apogee_id_join(force: bool = True) -> None:
+    """
+    Always use the live join (never the materialized view) in this process.
+    Clears any already-resolved source.
+    """
+    global _FORCE_LIVE_APOGEE_ID_JOIN, _APOGEE_ID_SOURCE
+    _FORCE_LIVE_APOGEE_ID_JOIN = bool(force)
+    _APOGEE_ID_SOURCE = None
+
+
+def set_apogee_id_source(source: Optional[Dict[str, Any]]) -> None:
+    """Install a source already resolved by the parent (pool workers)."""
+    global _APOGEE_ID_SOURCE
+    _APOGEE_ID_SOURCE = source
+
+
+def _quote_view_name(name: str) -> str:
+    import re
+
+    if not re.match(_VIEW_NAME_PATTERN, name):
+        raise ValueError(f"Invalid apogee_id_lookup_view name: {name!r}")
+    return ".".join(f'"{part}"' for part in name.split("."))
+
+
+def _execute_sql(sql: str, params=None) -> List[Tuple]:
+    """Run raw SQL and return all rows, with the same retry as `_execute_query`."""
+    from almanac.retry import retry_on_database_error
+    from almanac.database import database
+
+    @retry_on_database_error
+    def _fetch():
+        return list(database.execute_sql(sql, params).fetchall())
+
+    return _fetch()
+
+
+def parse_view_refresh_date(comment: Optional[str]):
+    """The date in a "Last refreshed: YYYY-MM-DD" comment, or None."""
+    import re
+    from datetime import date
+
+    if not comment:
+        return None
+    m = re.search(r"Last refreshed:\s*(\d{4})-(\d{2})-(\d{2})", comment, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return date(*map(int, m.groups()))
+    except ValueError:
+        return None
+
+
+def check_view_staleness(refreshed, table_stats) -> List[str]:
+    """
+    Heuristic client-side staleness check of the materialized view.
+
+    :param refreshed:
+        The view's last-refresh `date` (from its comment), or None.
+    :param table_stats:
+        Rows of (table, last_analyze, last_autoanalyze, n_mod_since_analyze)
+        from `pg_stat_all_tables` for the source tables.
+
+    :returns:
+        Warning messages (empty if no sign of staleness).
+
+    A data change to a source table increments its `n_mod_since_analyze`
+    until the next (auto)analyze. So any change made after the refresh shows
+    up either as `n_mod_since_analyze > 0` now, or as a last (auto)analyze on
+    or after the refresh date. Neither can be missed unless the server's
+    statistics were reset (crash recovery, `pg_stat_reset`), in which case
+    the timestamps are NULL and a warning is also given. It can give false
+    alarms: a maintenance ANALYZE with no data change, or an analyze on the
+    refresh day itself (the comment only carries a date), also warn.
+    """
+    warnings = []
+    if refreshed is None:
+        warnings.append(
+            "view comment has no 'Last refreshed: YYYY-MM-DD' date; "
+            "cannot check whether the view is current"
         )
-        .where(catalogdb.SDSS_ID_flat.rank == 1)
-        .tuples()
-    )
-    APOGEE_ID_LOOKUP = {}
-    for sdss_id, apogee_id in _execute_query(q):
-        if len(apogee_id.strip()) <= 2:
-            # There is one problematic entry of "AP" which caused 180,000
-            # fiber-exposures to be assigned to sdss_id 57991461
+    seen = set()
+    for table, last_analyze, last_autoanalyze, n_mod in table_stats:
+        seen.add(table)
+        if n_mod:
+            warnings.append(
+                f"{table} has {n_mod} row modifications not yet analyzed: "
+                "it changed at an unknown time, possibly after the view's refresh"
+            )
+        stamps = [t for t in (last_analyze, last_autoanalyze) if t is not None]
+        if not stamps:
+            warnings.append(
+                f"{table} has no analyze timestamp (statistics reset?); "
+                "cannot check it against the view's refresh date"
+            )
             continue
-        APOGEE_ID_LOOKUP[apogee_id] = sdss_id
-        for prefix in ("2M", "J", "AP"):
-            if apogee_id.startswith(prefix):
-                APOGEE_ID_LOOKUP[apogee_id[len(prefix):]] = sdss_id
-    return APOGEE_ID_LOOKUP
+        latest = max(stamps)
+        latest_date = latest.date() if hasattr(latest, "date") else latest
+        if refreshed is not None and latest_date >= refreshed:
+            warnings.append(
+                f"{table} was analyzed on {latest_date}, on or after the view's "
+                f"last refresh ({refreshed}): it may have changed since"
+            )
+    for table in APOGEE_ID_VIEW_SOURCE_TABLES:
+        if table.split(".", 1)[1] not in seen and table not in seen:
+            warnings.append(f"no statistics readable for {table}")
+    return warnings
+
+
+def _probe_view(view: str) -> Dict[str, Any]:
+    """
+    Read-only catalog checks for the view. Returns a dict with keys
+    exists, readable, nonempty, comment, refreshed, table_stats.
+    """
+    quoted = _quote_view_name(view)
+    info = dict(exists=False, readable=False, nonempty=False, comment=None,
+                refreshed=None, table_stats=[])
+    ((regclass, ), ) = _execute_sql("SELECT to_regclass(%s)::text", (view, ))
+    if regclass is None:
+        return info
+    info["exists"] = True
+    ((readable, comment), ) = _execute_sql(
+        "SELECT has_table_privilege(to_regclass(%s), 'SELECT'), "
+        "obj_description(to_regclass(%s), 'pg_class')",
+        (view, view)
+    )
+    info["readable"] = bool(readable)
+    info["comment"] = comment
+    info["refreshed"] = parse_view_refresh_date(comment)
+    if not readable:
+        return info
+    info["nonempty"] = bool(_execute_sql(f"SELECT 1 FROM {quoted} LIMIT 1"))
+    schemas_tables = [t.split(".", 1) for t in APOGEE_ID_VIEW_SOURCE_TABLES]
+    info["table_stats"] = _execute_sql(
+        "SELECT schemaname || '.' || relname, last_analyze, last_autoanalyze, "
+        "n_mod_since_analyze FROM pg_stat_all_tables "
+        "WHERE (schemaname, relname) IN (" + ", ".join(["(%s, %s)"] * len(schemas_tables)) + ")",
+        tuple(x for st in schemas_tables for x in st)
+    )
+    return info
+
+
+def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str, Any]:
+    """
+    Decide (once per process) whether APOGEE ID lookups read the materialized
+    view or run the live join, log the decision, and return a description:
+
+        source: "materialized_view" or "live_join"
+        view: configured view name ("" if disabled)
+        view_comment, view_last_refreshed: from the view's COMMENT
+        reason: why the live join is used (if it is)
+        staleness_warnings: list of heuristic staleness warnings
+
+    Never raises: any problem probing the view falls back to the live join.
+    """
+    global _APOGEE_ID_SOURCE
+    if force_live_join is not None:
+        force_live_apogee_id_join(force_live_join)
+    if _APOGEE_ID_SOURCE is not None:
+        return _APOGEE_ID_SOURCE
+
+    view = (getattr(config, "apogee_id_lookup_view", "") or "").strip()
+    source = dict(source=SOURCE_LIVE_JOIN, view=view, view_comment="",
+                  view_last_refreshed="", reason="", staleness_warnings=[])
+
+    if _FORCE_LIVE_APOGEE_ID_JOIN:
+        source["reason"] = "live join forced (--live-apogee-id-join)"
+    elif not view:
+        source["reason"] = "no view configured (apogee_id_lookup_view is empty)"
+    else:
+        try:
+            info = _probe_view(view)
+        except Exception as e:
+            source["reason"] = f"could not probe view {view}: {e}"
+            logger.warning(f"APOGEE ID lookup: {source['reason']}; using the live join")
+        else:
+            source["view_comment"] = info["comment"] or ""
+            source["view_last_refreshed"] = (
+                info["refreshed"].isoformat() if info["refreshed"] else ""
+            )
+            if not info["exists"]:
+                source["reason"] = f"view {view} does not exist"
+            elif not info["readable"]:
+                source["reason"] = f"view {view} is not readable by this account"
+                logger.warning(f"APOGEE ID lookup: {source['reason']}; using the live join")
+            elif not info["nonempty"]:
+                source["reason"] = f"view {view} is empty (never refreshed?)"
+                logger.warning(f"APOGEE ID lookup: {source['reason']}; using the live join")
+            else:
+                source["source"] = SOURCE_VIEW
+                logger.info(
+                    f"APOGEE ID lookup: reading materialized view {view} "
+                    f"(last refreshed: {source['view_last_refreshed'] or 'UNKNOWN'}; "
+                    f"comment: {source['view_comment']!r})"
+                )
+                try:
+                    source["staleness_warnings"] = check_view_staleness(
+                        info["refreshed"], info["table_stats"]
+                    )
+                except Exception as e:
+                    source["staleness_warnings"] = [f"staleness check failed: {e}"]
+                for message in source["staleness_warnings"]:
+                    logger.warning(
+                        f"APOGEE ID lookup: view {view} may be stale: {message}. "
+                        f"The view must be refreshed whenever its source tables "
+                        f"are updated; use --live-apogee-id-join to bypass it."
+                    )
+
+    if source["source"] == SOURCE_LIVE_JOIN:
+        logger.info(f"APOGEE ID lookup: using the live join ({source['reason']})")
+    _APOGEE_ID_SOURCE = source
+    return source
+
+
+def apogee_id_source_attrs(source: Optional[Dict[str, Any]], full: bool = False) -> Dict[str, str]:
+    """HDF5 attributes recording which APOGEE ID lookup source a night used."""
+    if source is None:
+        return {}
+    return {
+        "apogee_id_lookup_source": source["source"],
+        "apogee_id_lookup_mode": "full" if full else "targeted",
+        "apogee_id_lookup_view": source["view"] if source["source"] == SOURCE_VIEW else "",
+        "apogee_id_lookup_view_last_refreshed": (
+            source["view_last_refreshed"] if source["source"] == SOURCE_VIEW else ""
+        ),
+        "apogee_id_lookup_view_comment": (
+            source["view_comment"] if source["source"] == SOURCE_VIEW else ""
+        ),
+        "apogee_id_lookup_staleness_warnings": "; ".join(source["staleness_warnings"]),
+        "apogee_id_lookup_note": source["reason"],
+    }
+
+
+def _query_apogee_id_rows_from_view(view: str, apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str]]:
+    """
+    (sdss_id, apogee_id) rows from the materialized view: all rows, or only
+    those whose apogee_id is in `apogee_ids` (`= ANY(array)`, via its index).
+    """
+    quoted = _quote_view_name(view)
+    if apogee_ids is None:
+        return _execute_sql(f"SELECT sdss_id, apogee_id FROM {quoted}")
+    return _execute_sql(
+        f"SELECT sdss_id, apogee_id FROM {quoted} WHERE apogee_id = ANY(%s)",
+        (list(apogee_ids), )
+    )
+
+
+def create_apogee_id_lookup() -> Dict[str, int]:
+    """
+    Create the FULL lookup dictionary mapping every DR17 allStar APOGEE ID
+    (with and without its "2M"/"J"/"AP" prefix) to an SDSS ID.
+
+    Reads the whole materialized view if it is the resolved source (see
+    `resolve_apogee_id_source`), else runs the heavy live join (~734k rows;
+    see `set_apogee_id_lookup`). Normal runs do not need it:
+    `get_apogee_id_lookup` queries only the identifiers a night needs. It is
+    kept for `almanac --full-apogee-id-lookup`.
+    """
+    source = resolve_apogee_id_source()
+    if source["source"] == SOURCE_VIEW:
+        rows = _query_apogee_id_rows_from_view(source["view"])
+    else:
+        rows = _query_apogee_id_rows()
+    return _add_apogee_id_rows({}, rows)
+
+
+def _targeted_batch(batch: Sequence[str], source: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Look up one batch of identifiers; return {identifier: sdss_id} for the
+    identifiers that matched (values exactly as the full lookup would hold).
+
+    With the view as source, identifiers that the view does not match are
+    looked up again with the live join (the view may be stale; a genuine
+    no-match costs one small index-driven query, memoised). Any match the
+    live join finds that the view lacked is logged as a WARNING: it is direct
+    evidence that the view is out of date.
+    """
+    def _fold(ids, fetch):
+        candidates = sorted({c for identifier in ids for c in apogee_id_candidates(identifier)})
+        found = _add_apogee_id_rows({}, fetch(candidates))
+        # Keep only the requested keys: every row that can produce a
+        # requested key was fetched by this query, so those values are
+        # complete. Other keys produced along the way (e.g. the full
+        # "2M..." form) may be missing rows and are not stored.
+        return {identifier: found[identifier] for identifier in ids if identifier in found}
+
+    if source["source"] != SOURCE_VIEW:
+        return _fold(batch, _query_apogee_id_rows)
+
+    result = _fold(batch, lambda c: _query_apogee_id_rows_from_view(source["view"], c))
+    missing = [identifier for identifier in batch if identifier not in result]
+    if missing:
+        recovered = _fold(missing, _query_apogee_id_rows)
+        if recovered:
+            logger.warning(
+                f"APOGEE ID lookup: {len(recovered)} of {len(missing)} identifiers "
+                f"not in view {source['view']} were matched by the live join "
+                f"(e.g. {sorted(recovered)[:5]}): the view is stale and must be "
+                f"refreshed; using the live-join values for them"
+            )
+        result.update(recovered)
+    return result
+
+
+def get_apogee_id_lookup(
+    identifiers,
+    batch_size: Optional[int] = None,
+) -> Dict[str, int]:
+    """
+    Return an APOGEE ID -> SDSS ID lookup that contains an entry for every
+    identifier in `identifiers` that has a match.
+
+    If a full lookup was installed (`set_apogee_id_lookup`), it is returned
+    unchanged. Otherwise only the identifiers not already queried by this
+    process are looked up, in batches of `batch_size` identifiers, from the
+    materialized view if available (identifiers it misses are retried with
+    the live join) or else with the live join, and the answers (hits and
+    misses) are memoised for the life of the process.
+
+    For each requested identifier the value is exactly what the full lookup
+    built by `create_apogee_id_lookup` would hold for that key: every allStar
+    apogee_id that can produce the key (the identifier, or the identifier
+    with "2M", "J" or "AP" prepended) is fetched in the same query, and the
+    rows are folded with the same rules (bad short entries such as "AP" are
+    skipped; when several rows give the same key, the last row returned by
+    the database wins, as in the full lookup).
+
+    The returned dictionary is the process-wide memo; callers must not
+    mutate it. Only requested identifiers are guaranteed to be present.
+    """
+    if APOGEE_ID_LOOKUP is not None:
+        return APOGEE_ID_LOOKUP
+
+    if batch_size is None:
+        batch_size = APOGEE_ID_QUERY_BATCH_SIZE
+
+    todo = set(identifiers).difference(_TARGETED_APOGEE_ID_QUERIED)
+    # A blank identifier (empty 2MASS designation, common on FPS nights) can
+    # never match: all of its candidates are two characters or fewer after
+    # stripping, which `_add_apogee_id_rows` always skips. Record it as a
+    # miss without a query.
+    blank = {identifier for identifier in todo if not identifier.strip()}
+    _TARGETED_APOGEE_ID_QUERIED.update(blank)
+    todo = sorted(todo - blank)
+    if not todo:
+        return _TARGETED_APOGEE_ID_LOOKUP
+
+    from time import time
+    t_start = time()
+    source = resolve_apogee_id_source()
+    n_before = len(_TARGETED_APOGEE_ID_LOOKUP)
+    for i in range(0, len(todo), batch_size):
+        batch = todo[i:i + batch_size]
+        _TARGETED_APOGEE_ID_LOOKUP.update(_targeted_batch(batch, source))
+        _TARGETED_APOGEE_ID_QUERIED.update(batch)
+
+    logger.info(
+        f"Targeted APOGEE ID lookup ({source['source']}): {len(todo)} identifiers "
+        f"queried ({-(-len(todo) // batch_size)} batch(es)), "
+        f"{len(_TARGETED_APOGEE_ID_LOOKUP) - n_before} matched, "
+        f"in {time() - t_start:.2f} s"
+    )
+    return _TARGETED_APOGEE_ID_LOOKUP
 
 
 def get_unique_exposure_paths(paths: List[str]) -> List[str]:
@@ -619,11 +1091,9 @@ def get_almanac_data(
 
 
             if "coordinate" in identifiers and is_database_available:
-                global APOGEE_ID_LOOKUP
-                if APOGEE_ID_LOOKUP is None:
-                    APOGEE_ID_LOOKUP = create_apogee_id_lookup()
-
-                lookup["apogee_id"] = APOGEE_ID_LOOKUP
+                # Query only the APOGEE IDs this night needs (memoised per
+                # process), unless a full lookup was installed.
+                lookup["apogee_id"] = get_apogee_id_lookup(identifiers["coordinate"])
                 remaining = set(identifiers["coordinate"]).difference(lookup["apogee_id"].keys())
 
                 if remaining:
