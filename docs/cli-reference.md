@@ -69,6 +69,29 @@ Skip cross-matching targets with SDSS database.
 - Faster processing but less complete target information
 - **Example**: `almanac --fibers --no-x-match --mjd-start -7`
 
+#### APOGEE ID -> SDSS ID lookup
+Fibers identified only by an old (pre-v1) catalogid or a 2MASS-style
+designation are cross-matched through DR17 allStar `apogee_id`. By default
+almanac queries only the APOGEE IDs each night needs (in batches, memoised per
+process). If the materialized view named by the config key
+`apogee_id_lookup_view` (default `catalogdb.mv_apogee_id_to_sdss_id`) exists,
+is readable and is not empty, it is read instead of the four-table join; its
+"Last refreshed: YYYY-MM-DD" comment is logged, signs of staleness are logged
+as warnings, and identifiers the view misses are retried with the live join.
+Each night's HDF5 group records the source used in its
+`apogee_id_lookup_*` attributes. The view is a snapshot and must be refreshed
+whenever `sdss_id_flat`, `sdss_id_to_catalog`,
+`catalog_to_allstar_dr17_synspec_rev1` or `allstar_dr17_synspec_rev1` is
+updated.
+
+#### `--full-apogee-id-lookup`
+Build the full lookup (every DR17 allStar entry) once up front instead, and
+share it with all worker processes. One heavy query (tens of minutes warm,
+hours with a cold database cache) unless the materialized view exists.
+
+#### `--live-apogee-id-join`
+Never read the materialized view; always use the live database join.
+
 ### Output Control
 
 #### `--output <path>`, `-O <path>`
@@ -298,7 +321,7 @@ For bash completion support, consider adding alias:
 ```bash
 # Add to ~/.bashrc or ~/.bash_profile  
 alias almanac='almanac'
-complete -W '--mjd --mjds --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --output --skip-existing --processes --verbosity --help' almanac
+complete -W '--mjd --mjds --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --full-apogee-id-lookup --live-apogee-id-join --output --skip-existing --processes --verbosity --help' almanac
 ```
 
 ## Tips

@@ -3,14 +3,16 @@
 import click
 
 
-def _pool_initializer(apogee_id_lookup=None):
+def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None):
     """
     Initialize a process-pool worker.
 
     Resets any database connection state inherited from the parent (each
     worker must open its own connection), and installs the parent-built
-    APOGEE ID -> SDSS ID lookup, if one was provided, so that workers do not
-    each re-run the heavy query that builds it.
+    full APOGEE ID -> SDSS ID lookup, if one was provided
+    (`--full-apogee-id-lookup`), so that workers do not each re-run the heavy
+    query that builds it. Without one, workers query only the APOGEE IDs
+    their nights need.
     """
     from sdssdb.peewee.sdss5db import database
 
@@ -19,10 +21,13 @@ def _pool_initializer(apogee_id_lookup=None):
         database._state.conn = None
     from almanac.database import database
 
-    if apogee_id_lookup is not None:
-        from almanac import apogee
+    from almanac import apogee
 
+    if apogee_id_lookup is not None:
         apogee.set_apogee_id_lookup(apogee_id_lookup)
+    if apogee_id_source is not None:
+        # The parent already resolved (and logged) the lookup source.
+        apogee.set_apogee_id_source(apogee_id_source)
 
 
 @click.group(invoke_without_command=True)
@@ -50,6 +55,23 @@ def _pool_initializer(apogee_id_lookup=None):
 @click.option(
     "--no-x-match", is_flag=True, help="Do not cross-match targets with SDSS-V database"
 )
+@click.option(
+    "--full-apogee-id-lookup",
+    is_flag=True,
+    help=(
+        "Build the full APOGEE ID -> SDSS ID lookup (every DR17 allStar "
+        "entry; one heavy query) once up front, instead of querying only the "
+        "APOGEE IDs each night needs"
+    ),
+)
+@click.option(
+    "--live-apogee-id-join",
+    is_flag=True,
+    help=(
+        "Never read the APOGEE ID -> SDSS ID materialized view "
+        "(config `apogee_id_lookup_view`); always use the live database join"
+    ),
+)
 @click.option("--output", "-O", default=None, type=str, help="Output file")
 @click.option(
     "--processes", "-p", default=None, type=int, help="Number of processes to use"
@@ -74,6 +96,8 @@ def main(
     lco,
     fibers,
     no_x_match,
+    full_apogee_id_lookup,
+    live_apogee_id_join,
     output,
     processes,
     skip_existing,
@@ -151,6 +175,10 @@ def main(
 
             def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
                 io.update(fp, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
+                if lookup_attrs:
+                    # Which APOGEE ID -> SDSS ID source cross-matching used
+                    # (view and its refresh date, or the live join).
+                    fp[f"raw/{observatory_w}/{mjd_w}"].attrs.update(lookup_attrs)
 
             def _on_write_error(item, exception):
                 observatory_w, mjd_w = item[:2]
@@ -162,6 +190,31 @@ def main(
                 maxsize=max(4, 2 * (processes or 1)),
                 on_error=_on_write_error,
             ).start()
+
+        full_lookup = None
+        lookup_attrs = {}
+        apogee_id_source = None
+        if fibers and not no_x_match and tasks:
+            # Decide once, in this process, whether APOGEE ID lookups read the
+            # materialized view or run the live join; log the view's refresh
+            # date and any staleness warning; record the choice per night.
+            apogee_id_source = apogee.resolve_apogee_id_source(
+                force_live_join=live_apogee_id_join
+            )
+            lookup_attrs = apogee.apogee_id_source_attrs(
+                apogee_id_source, full=full_apogee_id_lookup
+            )
+        if full_apogee_id_lookup and fibers and not no_x_match and tasks:
+            # Opt-in: one heavy query for every DR17 allStar APOGEE ID
+            # (~734k rows; 11-40 min warm, hours with a cold database
+            # cache). By default each night queries only the APOGEE IDs it
+            # needs (see `apogee.get_apogee_id_lookup`).
+            logger.info(
+                "Building full APOGEE ID lookup (--full-apogee-id-lookup; "
+                "slow database step)"
+            )
+            full_lookup = apogee.create_apogee_id_lookup()
+            apogee.set_apogee_id_lookup(full_lookup)
 
         with context_manager as live:
             if processes is not None:
@@ -175,19 +228,11 @@ def main(
                 if processes < 0:
                     processes = os.cpu_count()
 
-                initargs = ()
-                if fibers and not no_x_match and apogee.any_plate_era(tasks):
-                    # Plate-era target cross-matching needs a large APOGEE ID
-                    # -> SDSS ID lookup built from a heavy database query
-                    # (~10 s, ~33 MB pickled). Build it ONCE here and ship it
-                    # to every worker through the pool initializer (free via
-                    # copy-on-write under fork), instead of each worker
-                    # independently re-querying the database on first use.
-                    logger.info(
-                        "Building APOGEE ID lookup in parent "
-                        "(plate-era nights present)"
-                    )
-                    initargs = (apogee.create_apogee_id_lookup(),)
+                # With --full-apogee-id-lookup, ship the parent-built full
+                # lookup to every worker through the pool initializer, so no
+                # worker re-runs the heavy query. Otherwise each worker
+                # queries (and memoises) only the APOGEE IDs its nights need.
+                initargs = (full_lookup, apogee_id_source)
 
                 with concurrent.futures.ProcessPoolExecutor(
                     max_workers=processes,

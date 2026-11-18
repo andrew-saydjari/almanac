@@ -33,6 +33,16 @@ class Config:
     # a single SSH tunnel.
     catalog_query_max_workers: int = 4
 
+    # Materialized view of (apogee_id, sdss_id) pairs (rank 1) to read for the
+    # APOGEE ID -> SDSS ID lookup instead of the four-table live join. If it
+    # does not exist, is unreadable or is empty, the live join is used. Set to
+    # "" to always use the live join. The view is a snapshot: it must be
+    # refreshed whenever sdss_id_flat, sdss_id_to_catalog,
+    # catalog_to_allstar_dr17_synspec_rev1 or allstar_dr17_synspec_rev1 is
+    # updated (almanac logs its "Last refreshed" comment and warns on signs
+    # of staleness).
+    apogee_id_lookup_view: str = "catalogdb.mv_apogee_id_to_sdss_id"
+
     sdssdb_exposure_min_mjd: ObservatoryMJD = field(default_factory=ObservatoryMJD)
     logging_level: int = 20  # logging.INFO
 
