@@ -146,18 +146,27 @@ the end). See ``almanac config show`` for the retry and worker-count knobs.
 
 ## Adding catalog metadata
 
-Once you have an output file with fiber mappings, `almanac add metadata` decorates it
-with a `meta/` group of astrometry, photometry, and targeting flags for every matched
-target (queried once per unique `sdss_id`):
+Once you have an output file with fiber mappings, `almanac add metadata` builds a `meta/`
+group of astrometry, photometry, and targeting flags for every matched target (queried
+once per unique `sdss_id`). **Do not run it on the almanac file the pipeline is reading.**
+Decorate a copy, or write a separate targets file:
 
 ```bash
-almanac add metadata /path/to/file.h5
-almanac add metadata /path/to/file.h5 --query-workers 4 # be gentle on remote tunnels
+cp /path/to/file.h5 /path/to/file_meta.h5
+almanac add metadata /path/to/file_meta.h5 --query-workers 4    # decorate the COPY
+almanac add metadata /path/to/file.h5 --output targets.h5       # input read-only
+almanac add metadata new.h5 --output targets_new.h5 --since targets.h5  # only new sdss_id
 ```
 
+Finished batches are checkpointed next to the output (`<output>.meta-checkpoint/`), so an
+interrupted run is resumed by re-running the same command; the final `/meta` is written in
+one step and carries provenance attributes (almanac version and commit, input file,
+database host, query times, columns). See `docs/cli-reference.md`.
+
 Note: `add metadata` is strongly sensitive to database locality — full-catalog passes
-measured ~660 ids/s cold DB-local versus 13--26k ids/s warm, and are impractically slow
-through an SSH tunnel. Run it on a host local to the SDSS database (e.g. at Utah).
+measured ~660 ids/s cold DB-local versus 13--26k ids/s warm, and are slow through an SSH
+tunnel (about 0.27 s per cold id on one connection). Run it on a host local to the SDSS
+database (e.g. at Utah) when you can.
 
 ## Configuration
 
