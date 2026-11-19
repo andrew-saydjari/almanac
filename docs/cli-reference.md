@@ -73,13 +73,22 @@ Skip cross-matching targets with SDSS database.
 Fibers identified only by an old (pre-v1) catalogid or a 2MASS-style
 designation are cross-matched through DR17 allStar `apogee_id`. By default
 almanac queries only the APOGEE IDs each night needs (in batches, memoised per
-process). If the materialized view named by the config key
+process). If the lookup relation named by the config key
 `apogee_id_lookup_view` (default `catalogdb.mv_apogee_id_to_sdss_id`) exists,
 is readable and is not empty, it is read instead of the four-table join; its
-"Last refreshed: YYYY-MM-DD" comment is logged, signs of staleness are logged
-as warnings, and identifiers the view misses are retried with the live join.
+"Last refreshed: YYYY-MM-DD" comment, if any, is logged; a warning is logged only
+if a source table was analyzed after that date, and identifiers the view misses are retried with the live join (a match found
+that way is logged as a warning that the table is stale). When an identifier
+has several sdss_id (several catalogids, each with a rank-1 sdss_id), the
+largest sdss_id is used, on every path.
 Each night's HDF5 group records the source used in its
-`apogee_id_lookup_*` attributes. The view is a snapshot and must be refreshed
+`apogee_id_lookup_*` attributes (`apogee_id_lookup_view_kind` says whether
+the relation is a table or a materialized view; the source value stays
+`materialized_view` for either). The database maintainers built
+`catalogdb.mv_apogee_id_to_sdss_id` on 2026-11-18 as an ordinary table
+(sdssdb model `catalogdb.MvApogeeIdToSdssId`, sdssdb main e7d71cb; almanac
+reads it with SQL, so no sdssdb upgrade is needed). It is listed in
+`almanac pgdump`. The table is a snapshot and must be rebuilt
 whenever `sdss_id_flat`, `sdss_id_to_catalog`,
 `catalog_to_allstar_dr17_synspec_rev1` or `allstar_dr17_synspec_rev1` is
 updated.
@@ -129,10 +138,28 @@ Long queries are fault-isolated per observatory/MJD pair:
 - **Resume**: Re-run the same command with `--skip-existing` to retry only the failed pairs
 - **Missing-exposure report**: Every detected missing exposure is recorded in the `/missing_exposures` table of the output file with a reason code (see [Data Formats](data-formats.md))
 
-## Metadata Commands
+## Adding to an Existing File
+
+### `almanac add fibers <file>`
+Add fiber-to-target mappings to an existing almanac HDF5 file that was created without `--fibers`. The exposures already in the file are used to locate the confSummary (FPS era) or plugmap (plate era) files, so the raw exposure headers are not read again. Mappings are written to `raw/<observatory>/<mjd>/fibers/<config_id or plate_id>`; a night that already has mappings has them replaced. Also accepted as `almanac add fibres`.
+
+```bash
+almanac add fibers results.h5
+almanac add fibers results.h5 --mjd 60000 --apo
+almanac add fibers results.h5 --no-x-match
+almanac add fibers results.h5 --processes 8
+```
+
+**Options**:
+- Date/MJD selection: `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, `--date`, `--date-start`/`--date-end` (defaults to every MJD present in the file)
+- Observatory selection: `--apo`, `--lco`
+- `--no-x-match`: Do not cross-match targets with the SDSS-V database (no `sdss_id` values are assigned)
+- `--processes`, `-p <integer>`: Number of processes to use (default: serial; negative values use every CPU)
+
+A night that fails (for example, a missing confSummary file) is recorded and skipped rather than aborting the run; failed nights are listed at the end.
 
 ### `almanac add metadata <file>`
-Decorate an existing almanac HDF5 file (created with `--fibers`) with astrometry, photometry, and targeting flags for every cross-matched target. Results are written to a `meta/` group in the same file, queried once per unique `sdss_id`.
+Decorate an existing almanac HDF5 file with astrometry, photometry, and targeting flags for every cross-matched target. Results are written to a `meta/` group in the same file, queried once per unique `sdss_id`. The file must already contain fiber mappings (created with `--fibers`, or added with `almanac add fibers`); if none are found for the selected nights, the command warns and exits with a non-zero status without touching the file.
 
 ```bash
 almanac add metadata results.h5

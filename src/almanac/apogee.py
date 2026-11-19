@@ -83,23 +83,62 @@ def any_plate_era(tasks) -> bool:
 
 def _add_apogee_id_rows(lookup: Dict[str, int], rows) -> Dict[str, int]:
     """
-    Add (sdss_id, apogee_id) rows to an APOGEE ID -> SDSS ID lookup, in row
-    order (a later row overwrites an earlier one for the same key).
+    Add (sdss_id, apogee_id[, rank]) rows to an APOGEE ID -> SDSS ID lookup.
+
+    Selection rule (see `best_ranked_lookup`): the best (lowest)
+    `sdss_id_flat.rank` wins; only among rows with that same best rank does
+    the larger sdss_id win (AKS 2026-11-18: the larger-sdss_id tie-break
+    applies "only if there are multiple rank 1 entries"). All queries keep
+    only rank-1 rows, so in practice the tie-break only separates two or more
+    rank-1 sdss_id for one key: `sdss_id_flat.rank` orders the sdss_ids of
+    one catalogid, and one star can have two catalogids (e.g. one per allStar
+    field) with a rank-1 sdss_id each (64 allStar apogee_ids as of
+    2026-11-18). Rows without a rank (the maintainers' lookup table, which
+    holds rank-1 pairs only) count as rank 1. The result does not depend on
+    row order.
 
     Each apogee_id is stored as-is, and also with a leading "2M", "J" or "AP"
     stripped, so that a 2MASS-style designation with its prefix removed (see
     `parse_target_identifier`) finds it.
     """
-    for sdss_id, apogee_id in rows:
-        if len(apogee_id.strip()) <= 2:
-            # There is one problematic entry of "AP" which caused 180,000
-            # fiber-exposures to be assigned to sdss_id 57991461
-            continue
-        lookup[apogee_id] = sdss_id
-        for prefix in APOGEE_ID_PREFIXES:
-            if apogee_id.startswith(prefix):
-                lookup[apogee_id[len(prefix):]] = sdss_id
+    def _keyed():
+        for row in rows:
+            sdss_id, apogee_id = row[0], row[1]
+            rank = row[2] if len(row) > 2 else 1
+            if len(apogee_id.strip()) <= 2:
+                # There is one problematic entry of "AP" which caused 180,000
+                # fiber-exposures to be assigned to sdss_id 57991461
+                continue
+            yield apogee_id, sdss_id, rank
+            for prefix in APOGEE_ID_PREFIXES:
+                if apogee_id.startswith(prefix):
+                    yield apogee_id[len(prefix):], sdss_id, rank
+
+    lookup.update(best_ranked_lookup(_keyed()))
     return lookup
+
+
+def best_ranked_lookup(rows) -> Dict[Any, int]:
+    """
+    {identifier: sdss_id} from (identifier, sdss_id, rank) rows.
+
+    For each identifier: the row with the best (lowest) `sdss_id_flat.rank`
+    wins; if several rows share that best rank, the LARGEST sdss_id among
+    them wins. A larger sdss_id never beats a better-ranked one. The result
+    is independent of row order. A missing rank (None) counts as worse than
+    any rank.
+    """
+    best: Dict[Any, Tuple[float, int]] = {}
+    for identifier, sdss_id, rank in rows:
+        r = float("inf") if rank is None else rank
+        current = best.get(identifier)
+        if (
+            current is None
+            or r < current[0]
+            or (r == current[0] and sdss_id > current[1])
+        ):
+            best[identifier] = (r, sdss_id)
+    return {identifier: sdss_id for identifier, (_, sdss_id) in best.items()}
 
 
 def apogee_id_candidates(identifier: str) -> Tuple[str, ...]:
@@ -111,10 +150,12 @@ def apogee_id_candidates(identifier: str) -> Tuple[str, ...]:
     return (identifier, ) + tuple(f"{prefix}{identifier}" for prefix in APOGEE_ID_PREFIXES)
 
 
-def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str]]:
+def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str, int]]:
     """
-    Query (sdss_id, apogee_id) rows linking DR17 allStar entries to SDSS IDs
-    (`sdss_id_flat.rank = 1` only).
+    Query (sdss_id, apogee_id, rank) rows linking DR17 allStar entries to
+    SDSS IDs (`sdss_id_flat.rank = 1` only, as before; the rank is returned
+    so that the fold in `_add_apogee_id_rows` can apply "best rank first"
+    explicitly rather than relying on this filter).
 
     :param apogee_ids:
         If given, only rows whose allStar apogee_id is in this collection are
@@ -151,7 +192,8 @@ def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tu
             catalogdb.SDSS_ID_flat
             .select(
                 catalogdb.SDSS_ID_flat.sdss_id,
-                catalogdb.AllStar_DR17_synspec_rev1.apogee_id
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id,
+                catalogdb.SDSS_ID_flat.rank,
             )
             .join(
                 catalogdb.SDSS_ID_To_Catalog,
@@ -184,7 +226,8 @@ def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tu
             catalogdb.AllStar_DR17_synspec_rev1
             .select(
                 catalogdb.SDSS_ID_flat.sdss_id,
-                catalogdb.AllStar_DR17_synspec_rev1.apogee_id
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id,
+                catalogdb.SDSS_ID_flat.rank,
             )
             .join(
                 CatalogToAllStar_DR17_synspec_rev1,
@@ -230,6 +273,11 @@ def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tu
 # check is run (WARNING only), and the chosen source is recorded in the
 # output (see `apogee_id_source_attrs`). If the view is absent, unreadable or
 # empty, the live join is used and nothing fails.
+#
+# The maintainers delivered `catalogdb.mv_apogee_id_to_sdss_id` on 2026-11-18
+# as an ordinary table (not a materialized view; sdssdb model
+# `catalogdb.MvApogeeIdToSdssId`, sdssdb main e7d71cb). Either kind is read
+# the same way; "view" below means whichever relation is configured.
 # ---------------------------------------------------------------------------
 
 # Source tables the view is a snapshot of.
@@ -305,10 +353,12 @@ def parse_view_refresh_date(comment: Optional[str]):
 
 def check_view_staleness(refreshed, table_stats) -> List[str]:
     """
-    Heuristic client-side staleness check of the materialized view.
+    Client-side staleness check of the lookup table / materialized view.
+    Silent unless there is positive evidence of a problem.
 
     :param refreshed:
-        The view's last-refresh `date` (from its comment), or None.
+        The view's last-refresh `date` (from a "Last refreshed: YYYY-MM-DD"
+        comment), or None.
     :param table_stats:
         Rows of (table, last_analyze, last_autoanalyze, n_mod_since_analyze)
         from `pg_stat_all_tables` for the source tables.
@@ -316,66 +366,67 @@ def check_view_staleness(refreshed, table_stats) -> List[str]:
     :returns:
         Warning messages (empty if no sign of staleness).
 
-    A data change to a source table increments its `n_mod_since_analyze`
-    until the next (auto)analyze. So any change made after the refresh shows
-    up either as `n_mod_since_analyze > 0` now, or as a last (auto)analyze on
-    or after the refresh date. Neither can be missed unless the server's
-    statistics were reset (crash recovery, `pg_stat_reset`), in which case
-    the timestamps are NULL and a warning is also given. It can give false
-    alarms: a maintenance ANALYZE with no data change, or an analyze on the
-    refresh day itself (the comment only carries a date), also warn.
+    The only warning: a source table was (auto)analyzed on a day AFTER the
+    refresh date, i.e. it was very likely changed after the snapshot was
+    built. Nothing is reported when the date is unknown (no comment; AKS
+    2026-11-18: "just remove the warning"), when statistics are missing, or
+    for unanalyzed modifications (`n_mod_since_analyze`), since none of
+    those is evidence that the snapshot is out of date. The direct evidence,
+    an identifier the table misses but the live join matches, is still
+    logged as a WARNING by `_targeted_batch`.
     """
     warnings = []
     if refreshed is None:
-        warnings.append(
-            "view comment has no 'Last refreshed: YYYY-MM-DD' date; "
-            "cannot check whether the view is current"
-        )
-    seen = set()
+        return warnings
     for table, last_analyze, last_autoanalyze, n_mod in table_stats:
-        seen.add(table)
-        if n_mod:
-            warnings.append(
-                f"{table} has {n_mod} row modifications not yet analyzed: "
-                "it changed at an unknown time, possibly after the view's refresh"
-            )
         stamps = [t for t in (last_analyze, last_autoanalyze) if t is not None]
         if not stamps:
-            warnings.append(
-                f"{table} has no analyze timestamp (statistics reset?); "
-                "cannot check it against the view's refresh date"
-            )
             continue
         latest = max(stamps)
         latest_date = latest.date() if hasattr(latest, "date") else latest
-        if refreshed is not None and latest_date >= refreshed:
+        if latest_date > refreshed:
             warnings.append(
-                f"{table} was analyzed on {latest_date}, on or after the view's "
-                f"last refresh ({refreshed}): it may have changed since"
+                f"{table} was analyzed on {latest_date}, after the view's "
+                f"last refresh ({refreshed}): it has probably changed since"
             )
-    for table in APOGEE_ID_VIEW_SOURCE_TABLES:
-        if table.split(".", 1)[1] not in seen and table not in seen:
-            warnings.append(f"no statistics readable for {table}")
     return warnings
+
+
+# pg_class.relkind -> name, for logging what kind of relation the lookup is.
+RELKIND_NAMES = {
+    "r": "table",
+    "m": "materialized view",
+    "v": "view",
+    "p": "partitioned table",
+    "f": "foreign table",
+}
 
 
 def _probe_view(view: str) -> Dict[str, Any]:
     """
     Read-only catalog checks for the view. Returns a dict with keys
-    exists, readable, nonempty, comment, refreshed, table_stats.
+    exists, readable, nonempty, kind, comment, refreshed, table_stats.
+
+    `kind` is what the relation is ("table", "materialized view", "view",
+    ...; "" if absent). The database maintainers delivered
+    `catalogdb.mv_apogee_id_to_sdss_id` (2026-11-18) as an ordinary table
+    despite its `mv_` prefix; any relation with `apogee_id` and `sdss_id`
+    columns works, and the kind is only logged and recorded.
     """
     quoted = _quote_view_name(view)
-    info = dict(exists=False, readable=False, nonempty=False, comment=None,
+    info = dict(exists=False, readable=False, nonempty=False, kind="", comment=None,
                 refreshed=None, table_stats=[])
     ((regclass, ), ) = _execute_sql("SELECT to_regclass(%s)::text", (view, ))
     if regclass is None:
         return info
     info["exists"] = True
-    ((readable, comment), ) = _execute_sql(
+    ((readable, comment, relkind), ) = _execute_sql(
         "SELECT has_table_privilege(to_regclass(%s), 'SELECT'), "
-        "obj_description(to_regclass(%s), 'pg_class')",
-        (view, view)
+        "obj_description(to_regclass(%s), 'pg_class'), "
+        "(SELECT relkind::text FROM pg_class WHERE oid = to_regclass(%s))",
+        (view, view, view)
     )
+    info["kind"] = RELKIND_NAMES.get(relkind, relkind or "")
     info["readable"] = bool(readable)
     info["comment"] = comment
     info["refreshed"] = parse_view_refresh_date(comment)
@@ -412,7 +463,7 @@ def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str
         return _APOGEE_ID_SOURCE
 
     view = (getattr(config, "apogee_id_lookup_view", "") or "").strip()
-    source = dict(source=SOURCE_LIVE_JOIN, view=view, view_comment="",
+    source = dict(source=SOURCE_LIVE_JOIN, view=view, view_kind="", view_comment="",
                   view_last_refreshed="", reason="", staleness_warnings=[])
 
     if _FORCE_LIVE_APOGEE_ID_JOIN:
@@ -426,6 +477,7 @@ def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str
             source["reason"] = f"could not probe view {view}: {e}"
             logger.warning(f"APOGEE ID lookup: {source['reason']}; using the live join")
         else:
+            source["view_kind"] = info.get("kind") or ""
             source["view_comment"] = info["comment"] or ""
             source["view_last_refreshed"] = (
                 info["refreshed"].isoformat() if info["refreshed"] else ""
@@ -441,8 +493,8 @@ def resolve_apogee_id_source(force_live_join: Optional[bool] = None) -> Dict[str
             else:
                 source["source"] = SOURCE_VIEW
                 logger.info(
-                    f"APOGEE ID lookup: reading materialized view {view} "
-                    f"(last refreshed: {source['view_last_refreshed'] or 'UNKNOWN'}; "
+                    f"APOGEE ID lookup: reading {view} "
+                    f"({source['view_kind'] or 'relation of unknown kind'}; last refreshed: {source['view_last_refreshed'] or 'UNKNOWN'}; "
                     f"comment: {source['view_comment']!r})"
                 )
                 try:
@@ -472,6 +524,9 @@ def apogee_id_source_attrs(source: Optional[Dict[str, Any]], full: bool = False)
         "apogee_id_lookup_source": source["source"],
         "apogee_id_lookup_mode": "full" if full else "targeted",
         "apogee_id_lookup_view": source["view"] if source["source"] == SOURCE_VIEW else "",
+        "apogee_id_lookup_view_kind": (
+            source.get("view_kind", "") if source["source"] == SOURCE_VIEW else ""
+        ),
         "apogee_id_lookup_view_last_refreshed": (
             source["view_last_refreshed"] if source["source"] == SOURCE_VIEW else ""
         ),
@@ -487,6 +542,11 @@ def _query_apogee_id_rows_from_view(view: str, apogee_ids: Optional[Sequence[str
     """
     (sdss_id, apogee_id) rows from the materialized view: all rows, or only
     those whose apogee_id is in `apogee_ids` (`= ANY(array)`, via its index).
+
+    The relation has no rank column: it holds only rank-1 pairs (the same
+    `sdss_id_flat.rank = 1` join; checked row by row against the live join
+    for all 657,134 apogee_ids on 2026-11-18). `_add_apogee_id_rows` treats
+    rows without a rank as rank 1.
     """
     quoted = _quote_view_name(view)
     if apogee_ids is None:
@@ -574,8 +634,8 @@ def get_apogee_id_lookup(
     apogee_id that can produce the key (the identifier, or the identifier
     with "2M", "J" or "AP" prepended) is fetched in the same query, and the
     rows are folded with the same rules (bad short entries such as "AP" are
-    skipped; when several rows give the same key, the last row returned by
-    the database wins, as in the full lookup).
+    skipped; best rank first, and among rows of equal best rank the largest
+    sdss_id, as in the full lookup).
 
     The returned dictionary is the process-wide memo; callers must not
     mutate it. Only requested identifiers are guaranteed to be present.
@@ -613,6 +673,98 @@ def get_apogee_id_lookup(
         f"in {time() - t_start:.2f} s"
     )
     return _TARGETED_APOGEE_ID_LOOKUP
+
+
+# ---------------------------------------------------------------------------
+# Identifier -> sdss_id lookups for the catalogid, Gaia DR2 and 2MASS paths.
+#
+# Each query keeps only `sdss_id_flat.rank = 1` rows (as before 2026-11-18)
+# and also returns the rank; `best_ranked_lookup` then picks, per
+# identifier, the best rank and, only among rows of that equal best rank,
+# the largest sdss_id. With the rank-1 filter, the tie-break only acts when
+# an identifier reaches two or more rank-1 sdss_id (e.g. a Gaia DR2 source
+# or 2MASS designation cross-matched to two catalogids).
+# ---------------------------------------------------------------------------
+
+def catalogid_sdss_id_lookup(catalogids) -> Dict[int, int]:
+    """{catalogid: sdss_id} for `catalogids` (rank 1; see above)."""
+    from almanac.database import catalogdb
+
+    q = (
+        catalogdb.SDSS_ID_flat
+        .select(
+            catalogdb.SDSS_ID_flat.catalogid,
+            catalogdb.SDSS_ID_flat.sdss_id,
+            catalogdb.SDSS_ID_flat.rank,
+        )
+        .where(
+            catalogdb.SDSS_ID_flat.catalogid.in_(tuple(catalogids))
+        &   (catalogdb.SDSS_ID_flat.rank == 1)
+        )
+        .tuples()
+    )
+    return best_ranked_lookup(_execute_query(q))
+
+
+def gaia_dr2_sdss_id_lookup(source_ids) -> Dict[int, int]:
+    """{gaia_dr2_source_id: sdss_id} for `source_ids` (rank 1; see above)."""
+    from almanac.database import catalogdb
+
+    q = (
+        catalogdb.SDSS_ID_flat
+        .select(
+            catalogdb.CatalogToGaia_DR2.target,
+            catalogdb.SDSS_ID_flat.sdss_id,
+            catalogdb.SDSS_ID_flat.rank,
+        )
+        .join(
+            catalogdb.CatalogToGaia_DR2,
+            on=(
+                catalogdb.SDSS_ID_flat.catalogid == catalogdb.CatalogToGaia_DR2.catalog
+            )
+        )
+        .where(
+            catalogdb.CatalogToGaia_DR2.target.in_(tuple(source_ids))
+        &   (catalogdb.SDSS_ID_flat.rank == 1)
+        )
+        .tuples()
+    )
+    return best_ranked_lookup(_execute_query(q))
+
+
+def twomass_sdss_id_lookup(designations) -> Dict[str, int]:
+    """{2MASS PSC designation: sdss_id} for `designations` (rank 1; see above)."""
+    from almanac.database import catalogdb
+
+    q = (
+        catalogdb.SDSS_ID_flat
+        .select(
+            catalogdb.TwoMassPSC.designation,
+            catalogdb.SDSS_ID_flat.sdss_id,
+            catalogdb.SDSS_ID_flat.rank,
+        )
+        .join(
+            catalogdb.CatalogToTwoMassPSC,
+            on=(
+                catalogdb.SDSS_ID_flat.catalogid
+                == catalogdb.CatalogToTwoMassPSC.catalogid
+            ),
+        )
+        .join(
+            catalogdb.TwoMassPSC,
+            on=(
+                catalogdb.CatalogToTwoMassPSC.target_id
+                == catalogdb.TwoMassPSC.pts_key
+            ),
+        )
+        .where(
+            catalogdb.TwoMassPSC.designation.in_(tuple(designations))
+        &   (catalogdb.SDSS_ID_flat.rank == 1)
+        )
+        .tuples()
+    )
+    return best_ranked_lookup(_execute_query(q))
+
 
 
 def get_unique_exposure_paths(paths: List[str]) -> List[str]:
@@ -998,6 +1150,91 @@ def parse_target_identifier(target):
             return ("coordinate", designation)
 
 
+def cross_match_targets(
+    exposures: List[Exposure],
+    science_sequences,
+    xmatch: bool = True,
+    only_assign_sdss_id_to_first_exposure_per_configuration: bool = True,
+) -> None:
+    """
+    Load the fiber-to-target mapping for the first exposure of each science
+    sequence and, optionally, cross-match those targets with the SDSS-V
+    database to assign each one an `sdss_id`.
+
+    The targets are read from the confSummary (FPS era) or plugmap (plate era)
+    files for the exposure. This mutates the given exposures in place; the
+    exposures themselves can come from raw exposure headers (see
+    `get_almanac_data`) or be read back from an existing almanac file (see
+    `almanac.io.read_exposures`).
+
+    :param exposures:
+        The exposures for one observatory and MJD, in exposure-number order
+        (i.e. `exposures[i].exposure == i + 1`).
+    :param science_sequences:
+        (start, end) pairs of 1-indexed exposure numbers for each science
+        sequence, as returned by `get_science_sequences`.
+    :param xmatch:
+        Whether to cross-match targets with the database to assign `sdss_id`.
+    :param only_assign_sdss_id_to_first_exposure_per_configuration:
+        If True (default), only assign `sdss_id` to the targets of the first
+        exposure in each science sequence.
+    """
+    identifiers = {}
+    # We only need to get targets for one exposure in each science sequence.
+    for si, ei in science_sequences:
+        exposure = exposures[si - 1]
+        for target in exposure.targets:
+            key, identifier = parse_target_identifier(target)
+            identifiers.setdefault(key, set()).add(identifier)
+
+    if xmatch:
+        # We will often run `get_almanac_data` in parallel (through multiple processes),
+        # so here we are avoiding opening a database connection until the child process starts.
+        from almanac.database import is_database_available
+
+        lookup = {}
+        if "catalogid" in identifiers and is_database_available:
+            lookup["catalogid"] = catalogid_sdss_id_lookup(identifiers["catalogid"])
+
+        if "gaia_dr2" in identifiers and is_database_available:
+            lookup["gaia_dr2"] = gaia_dr2_sdss_id_lookup(identifiers["gaia_dr2"])
+
+        if "coordinate" in identifiers and is_database_available:
+            # Query only the APOGEE IDs this night needs (memoised per
+            # process), unless a full lookup was installed.
+            lookup["apogee_id"] = get_apogee_id_lookup(identifiers["coordinate"])
+            remaining = set(identifiers["coordinate"]).difference(lookup["apogee_id"].keys())
+
+            if remaining:
+                # For remaining things, check 2MASS.
+                lookup["twomass_psc"] = twomass_sdss_id_lookup(remaining)
+
+        # Add sdss_id to targets
+        for si, ei in science_sequences:
+            iterable = [si - 1] if only_assign_sdss_id_to_first_exposure_per_configuration else range(si - 1, ei)
+            for i in iterable:
+                exposure = exposures[i]
+                for target in exposure.targets:
+                    if not assigns_sdss_id(target.category):
+                        # Don't assign sdss_id to unplugged targets, or to
+                        # off-target fibers: the positioner never reached
+                        # the assigned target, so whatever light the fiber
+                        # collected did not come from that source.
+                        continue
+
+                    key, identifier = parse_target_identifier(target)
+                    if key == "coordinate":
+                        for lookup_key in ("apogee_id", "twomass_psc"):
+                            target.sdss_id = lookup[lookup_key].get(identifier, -1)
+                            if target.sdss_id != -1:
+                                break
+                    else:
+                        target.sdss_id = lookup[key].get(identifier, -1)
+
+                    #if target.sdss_id == -1 and (target.category not in ("sky_apogee", "unplugged")):
+                    #    print(f"{observatory} {mjd} Exposure {exposure.exposure}: Could not find SDSS ID for target {identifier} ({key}) {target}")
+
+
 def get_almanac_data(
     observatory: str,
     mjd: int,
@@ -1014,10 +1251,11 @@ def get_almanac_data(
         The Modified Julian Date.
     :param fibers:
         Whether to include fiber mapping information.
-    :param xmatch:
-        Whether to perform cross-matching with catalog database.
-    :param kwargs:
-        Additional keyword arguments passed to other functions.
+    :param meta:
+        Whether to cross-match the fiber targets with the catalog database to
+        assign `sdss_id` values (ignored unless `fibers` is True).
+    :param only_assign_sdss_id_to_first_exposure_per_configuration:
+        See `cross_match_targets`.
 
     :returns:
         Tuple containing:
@@ -1035,120 +1273,13 @@ def get_almanac_data(
         "missing": get_sequences(exposures, "missing", ()),
     }
     if fibers:
-        identifiers = {}
-        # We only need to get targets for one exposure in each science sequence.
-        for si, ei in sequences["objects"]:
-            exposure = exposures[si - 1]
-            for target in exposure.targets:
-                key, identifier = parse_target_identifier(target)
-                identifiers.setdefault(key, set()).add(identifier)
-
-        if meta:
-            # We will often run `get_almanac_data` in parallel (through multiple processes),
-            # so here we are avoiding opening a database connection until the child process starts.
-            from almanac.database import is_database_available, catalogdb
-
-            lookup = {}
-            if "catalogid" in identifiers and is_database_available:
-                q = (
-                    catalogdb.SDSS_ID_flat
-                    .select(
-                        catalogdb.SDSS_ID_flat.sdss_id,
-                        catalogdb.SDSS_ID_flat.catalogid
-                    )
-                    .where(
-                        catalogdb.SDSS_ID_flat.catalogid.in_(tuple(identifiers["catalogid"]))
-                    &   (catalogdb.SDSS_ID_flat.rank == 1)
-                    )
-                    .tuples()
-                )
-                lookup["catalogid"] = {}
-                for sdss_id, catalogid in _execute_query(q):
-                    lookup["catalogid"][catalogid] = sdss_id
-
-            if "gaia_dr2" in identifiers and is_database_available:
-                q = (
-                    catalogdb.SDSS_ID_flat
-                    .select(
-                        catalogdb.SDSS_ID_flat.sdss_id,
-                        catalogdb.CatalogToGaia_DR2.target
-                    )
-                    .join(
-                        catalogdb.CatalogToGaia_DR2,
-                        on=(
-                            catalogdb.SDSS_ID_flat.catalogid == catalogdb.CatalogToGaia_DR2.catalog
-                        )
-                    )
-                    .where(
-                        catalogdb.CatalogToGaia_DR2.target.in_(tuple(identifiers["gaia_dr2"]))
-                    &   (catalogdb.SDSS_ID_flat.rank == 1)
-                    )
-                    .tuples()
-                )
-                lookup["gaia_dr2"] = {}
-                for sdss_id, gaia_dr2_source_id in _execute_query(q):
-                    lookup["gaia_dr2"][gaia_dr2_source_id] = sdss_id
-
-
-            if "coordinate" in identifiers and is_database_available:
-                # Query only the APOGEE IDs this night needs (memoised per
-                # process), unless a full lookup was installed.
-                lookup["apogee_id"] = get_apogee_id_lookup(identifiers["coordinate"])
-                remaining = set(identifiers["coordinate"]).difference(lookup["apogee_id"].keys())
-
-                if remaining:
-                    # For remaining things, check 2MASS.
-                    q = (
-                        catalogdb.SDSS_ID_flat
-                        .select(
-                            catalogdb.TwoMassPSC.designation,
-                            catalogdb.SDSS_ID_flat.sdss_id
-                        )
-                        .join(
-                            catalogdb.CatalogToTwoMassPSC,
-                            on=(
-                                catalogdb.SDSS_ID_flat.catalogid
-                                == catalogdb.CatalogToTwoMassPSC.catalogid
-                            ),
-                        )
-                        .join(
-                            catalogdb.TwoMassPSC,
-                            on=(
-                                catalogdb.CatalogToTwoMassPSC.target_id
-                                == catalogdb.TwoMassPSC.pts_key
-                            ),
-                        )
-                        .where(
-                            catalogdb.TwoMassPSC.designation.in_(tuple(remaining))
-                        &   (catalogdb.SDSS_ID_flat.rank == 1)
-                        )
-                        .tuples()
-                    )
-                    lookup["twomass_psc"] = { d: s for d, s in _execute_query(q) }
-
-            # Add sdss_id to targets
-            for si, ei in sequences["objects"]:
-                iterable = [si - 1] if only_assign_sdss_id_to_first_exposure_per_configuration else range(si - 1, ei)
-                for i in iterable:
-                    exposure = exposures[i]
-                    for target in exposure.targets:
-                        if not assigns_sdss_id(target.category):
-                            # Don't assign sdss_id to unplugged targets, or to
-                            # off-target fibers: the positioner never reached
-                            # the assigned target, so whatever light the fiber
-                            # collected did not come from that source.
-                            continue
-
-                        key, identifier = parse_target_identifier(target)
-                        if key == "coordinate":
-                            for lookup_key in ("apogee_id", "twomass_psc"):
-                                target.sdss_id = lookup[lookup_key].get(identifier, -1)
-                                if target.sdss_id != -1:
-                                    break
-                        else:
-                            target.sdss_id = lookup[key].get(identifier, -1)
-
-                        #if target.sdss_id == -1 and (target.category not in ("sky_apogee", "unplugged")):
-                        #    print(f"{observatory} {mjd} Exposure {exposure.exposure}: Could not find SDSS ID for target {identifier} ({key}) {target}")
+        cross_match_targets(
+            exposures,
+            sequences["objects"],
+            xmatch=meta,
+            only_assign_sdss_id_to_first_exposure_per_configuration=(
+                only_assign_sdss_id_to_first_exposure_per_configuration
+            ),
+        )
 
     return (observatory, mjd, exposures, sequences, missing)

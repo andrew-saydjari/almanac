@@ -23,10 +23,10 @@ ROWS = [
     (57991461, "AP"),              # the bad entry (stripped key would be "")
     (57991462, "2M"),              # other too-short entries
     (57991463, "J "),
-    (105, "2M00000005+0000005"),   # same apogee_id, two sdss_ids: last wins
+    (105, "2M00000005+0000005"),   # same apogee_id, two sdss_ids: larger wins
     (106, "2M00000005+0000005"),
     (107, "2M00000006+0000006"),   # two apogee_ids giving the same key
-    (108, "AP00000006+0000006"),   #   "00000006+0000006": last wins
+    (108, "AP00000006+0000006"),   #   "00000006+0000006": larger wins
     (109, "00000007+0000007"),     # bare key, then a prefixed one overwrites it
     (110, "J00000007+0000007"),
     (111, "2M00000008+0000008"),   # prefixed key, then a bare one overwrites it
@@ -157,7 +157,7 @@ class TestNoMatchAndDuplicates:
         assert "99999999+9999999" not in lookup
         assert lookup.get("99999999+9999999", -1) == -1
 
-    def test_duplicates_last_row_wins(self, fake):
+    def test_duplicates_larger_sdss_id_wins(self, fake):
         lookup = get_apogee_id_lookup(
             ["00000005+0000005", "00000006+0000006", "00000007+0000007",
              "00000008+0000008", "00000009+0000009"]
@@ -261,9 +261,10 @@ class TestFullLookupOption:
         assert fake.calls == []
 
     def test_full_lookup_matches_old_construction(self, fake):
-        # The pre-PR loop, verbatim, on the same rows.
+        # The pre-PR loop, verbatim, on the same rows sorted by sdss_id (so
+        # "last row wins" there is "larger sdss_id wins").
         old = {}
-        for sdss_id, apogee_id in ROWS:
+        for sdss_id, apogee_id in sorted(ROWS):
             if len(apogee_id.strip()) <= 2:
                 continue
             old[apogee_id] = sdss_id
@@ -301,3 +302,142 @@ class TestQuerySQL:
         assert 'FROM "catalogdb"."sdss_id_flat"' in sql
         assert " IN " not in sql
         assert params == [1]
+
+
+class TestLargerSdssIdTieBreak:
+    """AKS 2026-11-18: among several equally (rank-1) ranked sdss_id for one
+    identifier, take the larger. (ROWS carry no rank, i.e. all rank 1.)"""
+
+    @pytest.mark.parametrize("order", ["ascending", "descending", "shuffled"])
+    def test_independent_of_row_order(self, order):
+        import random
+        rows = list(ROWS)
+        if order == "descending":
+            rows = rows[::-1]
+        elif order == "shuffled":
+            random.Random(3).shuffle(rows)
+        expected = apogee._add_apogee_id_rows({}, sorted(ROWS))
+        assert apogee._add_apogee_id_rows({}, rows) == expected
+        assert expected["00000005+0000005"] == 106
+        assert expected["2M00000005+0000005"] == 106
+        assert expected["00000006+0000006"] == 108
+        assert expected["00000007+0000007"] == 110
+        assert expected["00000008+0000008"] == 112
+
+    def test_real_tie_example(self):
+        # allStar AP00451807+4047096 (fields ANDR3, ANDR3shift) has two
+        # rank-1 sdss_id; either row order gives the larger one.
+        rows = [(129048422, "AP00451807+4047096"), (129046733, "AP00451807+4047096")]
+        for r in (rows, rows[::-1]):
+            lookup = apogee._add_apogee_id_rows({}, r)
+            assert lookup["00451807+4047096"] == 129048422
+            assert lookup["AP00451807+4047096"] == 129048422
+
+    def test_targeted_lookup_independent_of_row_order(self, monkeypatch):
+        results = []
+        for reverse in (False, True):
+            fake = FakeQueryLayer(rows=ROWS[::-1] if reverse else ROWS)
+            monkeypatch.setattr(apogee, "_query_apogee_id_rows", fake)
+            apogee.APOGEE_ID_LOOKUP = None
+            apogee.clear_targeted_apogee_id_lookup()
+            apogee.force_live_apogee_id_join(True)
+            results.append(dict(get_apogee_id_lookup(ALL_IDENTIFIERS)))
+        apogee.clear_targeted_apogee_id_lookup()
+        apogee.force_live_apogee_id_join(False)
+        assert results[0] == results[1]
+
+    def test_best_ranked_lookup_equal_rank(self):
+        rows = [(5, 20, 1), (5, 10, 1), (6, 1, 1), (5, 30, 1), (6, 2, 1)]
+        assert apogee.best_ranked_lookup(rows) == {5: 30, 6: 2}
+        assert apogee.best_ranked_lookup(rows[::-1]) == {5: 30, 6: 2}
+        assert apogee.best_ranked_lookup([]) == {}
+
+
+class TestRankBeforeSdssId:
+    """
+    AKS 2026-11-18: "For the tie break, that should only be if there are
+    multiple rank 1 entries." Best (lowest) rank wins; the larger sdss_id
+    only breaks a tie among rows of equal best rank. A larger sdss_id with a
+    worse rank must NOT win.
+    """
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_larger_sdss_id_with_worse_rank_loses(self, reverse):
+        # Real shape: catalogid 63050395066243429 has sdss_id 70149305
+        # (rank 1) and 70149306 (rank 2); the rank-2 one is larger.
+        rows = [(63050395066243429, 70149305, 1), (63050395066243429, 70149306, 2)]
+        if reverse:
+            rows = rows[::-1]
+        assert apogee.best_ranked_lookup(rows) == {63050395066243429: 70149305}
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_tie_among_best_rank_takes_larger(self, reverse):
+        rows = [("g", 10, 1), ("g", 30, 2), ("g", 20, 1), ("g", 99, 3)]
+        if reverse:
+            rows = rows[::-1]
+        # 30 and 99 are larger but worse-ranked; among rank 1, 20 > 10.
+        assert apogee.best_ranked_lookup(rows) == {"g": 20}
+
+    def test_single_best_rank_row_wins_regardless_of_size(self):
+        rows = [("g", 1, 1)] + [("g", 1000 + i, 2) for i in range(5)]
+        assert apogee.best_ranked_lookup(rows) == {"g": 1}
+
+    def test_missing_rank_is_worst(self):
+        assert apogee.best_ranked_lookup([("g", 50, None), ("g", 5, 2)]) == {"g": 5}
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_apogee_id_rows_rank_precedence(self, reverse):
+        rows = [
+            (200, "2M00000010+0000010", 2),   # larger, worse rank
+            (100, "2M00000010+0000010", 1),
+            (300, "AP00000010+0000010", 3),   # other apogee_id, same stripped key
+            (150, "2M00000011+0000011", 1),   # genuine rank-1 tie: larger wins
+            (140, "AP00000011+0000011", 1),
+        ]
+        if reverse:
+            rows = rows[::-1]
+        lookup = apogee._add_apogee_id_rows({}, rows)
+        assert lookup["00000010+0000010"] == 100
+        assert lookup["2M00000010+0000010"] == 100
+        assert lookup["AP00000010+0000010"] == 300  # its only row
+        assert lookup["00000011+0000011"] == 150
+        assert lookup["AP00000011+0000011"] == 140
+
+    def test_rows_without_rank_count_as_rank_1(self):
+        # The lookup table has no rank column (rank-1 pairs only).
+        rows = [(200, "2M00000010+0000010", 2), (100, "2M00000010+0000010")]
+        assert apogee._add_apogee_id_rows({}, rows)["00000010+0000010"] == 100
+        rows = [(100, "2M00000010+0000010"), (200, "2M00000010+0000010")]
+        assert apogee._add_apogee_id_rows({}, rows)["00000010+0000010"] == 200
+
+    def test_targeted_lookup_rank_precedence(self, monkeypatch):
+        rows = [
+            (200, "2M00000010+0000010", 2),
+            (100, "2M00000010+0000010", 1),
+            (150, "2M00000011+0000011", 1),
+            (140, "AP00000011+0000011", 1),
+        ]
+        results = []
+        for r in (rows, rows[::-1]):
+            monkeypatch.setattr(apogee, "_query_apogee_id_rows", FakeQueryLayer(rows=r))
+            apogee.APOGEE_ID_LOOKUP = None
+            apogee.clear_targeted_apogee_id_lookup()
+            apogee.force_live_apogee_id_join(True)
+            results.append(dict(get_apogee_id_lookup(["00000010+0000010", "00000011+0000011"])))
+        apogee.clear_targeted_apogee_id_lookup()
+        apogee.force_live_apogee_id_join(False)
+        assert results[0] == results[1] == {"00000010+0000010": 100, "00000011+0000011": 150}
+
+    @pytest.mark.parametrize(
+        "helper", ["catalogid_sdss_id_lookup", "gaia_dr2_sdss_id_lookup", "twomass_sdss_id_lookup"]
+    )
+    def test_path_helpers_apply_rank_rule(self, helper, monkeypatch):
+        # The query result is replaced; checks the fold each path uses.
+        pytest.importorskip("peewee")
+        rows = [("k", 70149306, 2), ("k", 70149305, 1), ("t", 5, 1), ("t", 7, 1)]
+        monkeypatch.setattr(apogee, "_execute_query", lambda q: rows)
+        try:
+            out = getattr(apogee, helper)(["k", "t"])
+        except Exception as e:  # pragma: no cover - needs sdssdb models
+            pytest.skip(f"catalogdb models unavailable: {e}")
+        assert out == {"k": 70149305, "t": 7}
