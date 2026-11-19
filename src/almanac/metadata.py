@@ -321,6 +321,22 @@ def _default_query_batch(sdss_ids, suffix=""):
     return _query_catalog(list(sdss_ids), suffix=suffix)
 
 
+def _worker_init():
+    """Open the worker's database connection before its first batch, so that
+    batch timings measure the queries only."""
+    try:
+        import almanac.database  # noqa: F401  (connects on import)
+    except Exception:
+        pass
+
+
+def _timed_call(query_batch, ids, suffix):
+    """Run one batch in a worker; return (start_utc, end_utc, result)."""
+    t0 = _utcnow()
+    result = query_batch(ids, suffix)
+    return t0, _utcnow(), result
+
+
 def _run_batches(
     batches: List[tuple],
     query_batch: Callable,
@@ -361,17 +377,18 @@ def _run_batches(
             import concurrent.futures as cf
             from concurrent.futures.process import BrokenProcessPool
 
-            executor = cf.ProcessPoolExecutor(max_workers=n_workers)
+            executor = cf.ProcessPoolExecutor(
+                max_workers=n_workers,
+                initializer=_worker_init if query_batch is _default_query_batch else None,
+            )
             try:
-                started = {}
                 futures = {}
                 for index, ids in todo:
-                    futures[executor.submit(query_batch, ids, f"_{index}")] = (index, ids)
-                    started[index] = _utcnow()
+                    futures[executor.submit(_timed_call, query_batch, ids, f"_{index}")] = (index, ids)
                 for future in cf.as_completed(futures):
                     index, ids = futures[future]
                     try:
-                        result = future.result()
+                        t_start, t_end, result = future.result()
                     except BrokenProcessPool as e:
                         _log(f"worker pool broke while running batch {index}: {e!r}; will rebuild it")
                         retry.append((index, ids))
@@ -385,7 +402,7 @@ def _run_batches(
                             ) from e
                         retry.append((index, ids))
                         continue
-                    on_done(index, ids, result, started[index], _utcnow())
+                    on_done(index, ids, result, t_start, t_end)
             except BaseException:
                 # Stop the workers rather than leave orphaned queries running.
                 for proc in list(getattr(executor, "_processes", {}).values()):
