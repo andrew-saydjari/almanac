@@ -685,6 +685,15 @@ def _get_sdss_ids(fp, obs, mjd):
               help="Give up (keeping the checkpoint) after a batch fails this many times.")
 @click.option("--retry-backoff", default=60.0, type=float, show_default=True,
               help="Base delay [s] before re-running failed batches (doubles each round, max 30 min).")
+@click.option(
+    "--extended", is_flag=True, default=False,
+    help=(
+        "Also write value-added columns after the default ones: SDSS_ID position "
+        "(ra, dec, l, b, healpix), n_associated, unWISE, GLIMPSE, Bailer-Jones (2021) "
+        "distances, Gaia DR3 synthetic photometry, Zhang, Green & Rix (2023) parameters "
+        "and SDSS-IV APOGEE (DR17) targeting flags. 8 more queries per batch (slower)."
+    ),
+)
 def metadata(
     input_path,
     mjd,
@@ -708,6 +717,7 @@ def metadata(
     retry_not_found,
     max_batch_attempts,
     retry_backoff,
+    extended,
     **kwargs,
 ):
     """Add astrometry, photometry and targeting flags (/meta) for every sdss_id.
@@ -720,6 +730,8 @@ def metadata(
       almanac add metadata almanac.h5 --output targets.h5
     Incremental (only new sdss_id are queried):
       almanac add metadata new.h5 --output targets_new.h5 --since targets_old.h5
+    Value-added columns (opt-in; the default columns are unchanged):
+      almanac add metadata almanac.h5 --output targets_ext.h5 --extended
 
     Finished batches are checkpointed; re-running the same command resumes.
     The final /meta is written in one step (temporary file or group, then rename).
@@ -749,6 +761,7 @@ def metadata(
             retry_not_found=retry_not_found,
             max_batch_attempts=max_batch_attempts,
             retry_backoff=retry_backoff,
+            extended=extended,
         )
     except MetadataBuildError as e:
         raise click.ClickException(str(e))
@@ -1371,13 +1384,27 @@ PGDUMP_TABLES = (
     "opsdb_lco.exposure_flavor",
 )
 
+# Extra tables read by `almanac add metadata --extended` (from upstream a922dee;
+# allstar_dr17_synspec_rev1 is already above). Dumped only with `pgdump --extended`:
+# several are large (unwise, gaia_dr3_synthetic_photometry_gspc).
+PGDUMP_EXTENDED_TABLES = (
+    "catalogdb.sdss_id_stacked",
+    "catalogdb.unwise",
+    "catalogdb.glimpse",
+    "catalogdb.bailer_jones_edr3",
+    "catalogdb.gaia_dr3_synthetic_photometry_gspc",
+    "catalogdb.gaia_stellar_parameters",
+)
+
 
 @main.command()
 @click.argument("output_dir", type=str)
 @click.option("--host", default=None, type=str, help="PostgreSQL host (overrides config)")
 @click.option("--user", "-U", default=None, type=str, help="PostgreSQL user (overrides config)")
 @click.option("--database", "-d", default="sdss5db", show_default=True, type=str, help="PostgreSQL database name")
-def pgdump(output_dir, host, user, database, **kwargs):
+@click.option("--extended", is_flag=True, default=False,
+              help="Also dump the tables `add metadata --extended` reads (several are large).")
+def pgdump(output_dir, host, user, database, extended=False, **kwargs):
     """Dump a fixed set of PostgreSQL tables to OUTPUT_DIR.
 
     Each table is dumped in pg_dump custom format (.dump). Tables that
@@ -1393,15 +1420,16 @@ def pgdump(output_dir, host, user, database, **kwargs):
     pg_user = user or config.sdssdb.user
 
     os.makedirs(output_dir, exist_ok=True)
+    tables = PGDUMP_TABLES + (PGDUMP_EXTENDED_TABLES if extended else ())
 
-    click.echo(f"Found {len(PGDUMP_TABLES)} tables")
+    click.echo(f"Found {len(tables)} tables")
     click.echo(f"Output directory: {output_dir}")
     click.echo("---")
 
     success = 0
     failed = 0
 
-    for entry in PGDUMP_TABLES:
+    for entry in tables:
         schema, _, table = entry.partition(".")
         out_path = os.path.join(output_dir, f"{schema}.{table}.dump")
         click.echo(f"Dumping {schema}.{table} ... ", nl=False)
@@ -1432,7 +1460,7 @@ def pgdump(output_dir, host, user, database, **kwargs):
             failed += 1
 
     click.echo("---")
-    click.echo(f"Done: {success} succeeded, {failed} failed out of {len(PGDUMP_TABLES)} tables")
+    click.echo(f"Done: {success} succeeded, {failed} failed out of {len(tables)} tables")
 
 
 @main.command()
