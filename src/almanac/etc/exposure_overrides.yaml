@@ -1,0 +1,258 @@
+# Exposure overrides applied by almanac (see almanac/overrides.py).
+# Add an entry ONLY when the evidence is certain; quote the source verbatim.
+# Disable all of them with `almanac --no-overrides`.
+version: 1
+overrides:
+  - id: apo-55755-aadaf-vesta-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "19-23,29"
+    action: retarget_fibers
+    fibers: {203: "VESTA"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that VESTA fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "19 Vesta goes to fiber 203. This one is extremely weak, signal ~ 45 / 20 Vesta goes to fiber 203, zero signal / 21 zero signal again... / 22 Vesta to fiber 203. Signal 380. / 23 Vesta to fiber 203. Signal 3500. / 29 Vesta fiber 203 signal 2400"
+  - id: apo-55755-aadaf-vesta-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "30-31"
+    action: retarget_fibers
+    fibers: {192: "VESTA"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that VESTA fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "30 Vesta fiber 192 signal  700 / 31 Vesta fiber 192 signal  200. Asteroid drifted away."
+  - id: apo-55755-aadaf-vesta-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "32-33"
+    action: retarget_fibers
+    fibers: {295: "VESTA"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that VESTA fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "32 Vesta fiber 295 signal 1100 / 33 Vesta fiber 295 signal  140"
+  - id: apo-55755-aadaf-betaoph-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "24"
+    action: retarget_fibers
+    fibers: {203: "beta Oph"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that beta Oph fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "24 (wrong comment) beta Oph in fiber 203. Strong saturation - the sky is clear in this part :("
+  - id: apo-55755-aadaf-hd196944-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "25"
+    action: retarget_fibers
+    fibers: {203: "HD 196944"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HD 196944 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "25 HD 196944  fiber 203 signal 1100"
+  - id: apo-55755-aadaf-hd196944-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "26"
+    action: retarget_fibers
+    fibers: {192: "HD 196944"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HD 196944 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "26 HD 196944  fiber 192 signal 1600"
+  - id: apo-55755-aadaf-hd196944-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "27-28"
+    action: retarget_fibers
+    fibers: {295: "HD 196944"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HD 196944 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "27 HD 196944  fiber 295 signal 900 / 28 HD 196944  fiber 295 signal 2100"
+  - id: apo-55755-aadaf-hip98456-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "34"
+    action: retarget_fibers
+    fibers: {203: "HIP 98456"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 98456 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "34 HIP 98456 fiber 203"
+  - id: apo-55755-aadaf-hip98456-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "35"
+    action: retarget_fibers
+    fibers: {192: "HIP 98456"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 98456 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "35 HIP 98456 fiber 192"
+  - id: apo-55755-aadaf-hip98456-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "36"
+    action: retarget_fibers
+    fibers: {295: "HIP 98456"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 98456 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "36 HIP 98456 fiber 295"
+  - id: apo-55755-aadaf-hip99987-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "37"
+    action: retarget_fibers
+    fibers: {203: "HIP 99987"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 99987 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "37 HIP 99987 fiber 203"
+  - id: apo-55755-aadaf-hip99987-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "38"
+    action: retarget_fibers
+    fibers: {192: "HIP 99987"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 99987 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "38 HIP 99987 fiber 192"
+  - id: apo-55755-aadaf-hip99987-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "39"
+    action: retarget_fibers
+    fibers: {295: "HIP 99987"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 99987 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "39 HIP 99987 fiber 295"
+  - id: apo-55755-aadaf-hip101226-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "40"
+    action: retarget_fibers
+    fibers: {203: "HIP 101226"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 101226 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "40 HIP 101226 fiber 203"
+  - id: apo-55755-aadaf-hip101226-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "41"
+    action: retarget_fibers
+    fibers: {192: "HIP 101226"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 101226 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "41 HIP 101226 fiber 192"
+  - id: apo-55755-aadaf-hip101226-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "42"
+    action: retarget_fibers
+    fibers: {295: "HIP 101226"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 101226 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "42 HIP 101226 fiber 295"
+  - id: apo-55755-skyflat-as-object
+    observatory: apo
+    mjd: 55755
+    exposures: "18,44"
+    action: not_science
+    reason: >-
+      Sky flats taken with the telescope offset 0.01 deg in RA (header RA 0.011 deg from the
+      plate centre for 18; 44 is at the HIP 101226 position) but labelled OBJECT with plate 5099.
+      No plugmap target was in its fiber. Exposure 43, the same kind of frame, is already
+      classified twilightflat by almanac from its comment.
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "18 This is Sky Flat. The fits comment is wrong. / 44 sky exp, offset 0.01 deg RA - sky flat again with consistent # of reads=30"

@@ -1155,7 +1155,8 @@ def get_almanac_data(
     mjd: int,
     fibers: bool = False,
     meta: bool = False,
-    only_assign_sdss_id_to_first_exposure_per_configuration: bool = True
+    only_assign_sdss_id_to_first_exposure_per_configuration: bool = True,
+    overrides: bool = True,
 ):
     """
     Return comprehensive almanac data for all exposures taken from a given observatory on a given MJD.
@@ -1168,6 +1169,9 @@ def get_almanac_data(
         Whether to include fiber mapping information.
     :param xmatch:
         Whether to perform cross-matching with catalog database.
+    :param overrides: [optional]
+        Apply the exposure overrides in `almanac/etc/exposure_overrides.yaml`
+        (see `almanac.overrides`). This is the only place they are applied.
     :param kwargs:
         Additional keyword arguments passed to other functions.
 
@@ -1181,6 +1185,19 @@ def get_almanac_data(
     """
 
     exposures, missing = get_exposures_and_missing(observatory, mjd)
+
+    night_overrides = []
+    if overrides:
+        from almanac.overrides import overrides_for, apply_exposure_overrides
+        night_overrides = overrides_for(observatory, mjd)
+        if night_overrides:
+            # Before sequences: a configuration override changes `config_id`.
+            apply_exposure_overrides(exposures, night_overrides)
+            logger.info(
+                f"{observatory}/{mjd}: applied exposure overrides "
+                f"{', '.join(o.id for o in night_overrides)}"
+            )
+
     sequences = {
         "objects": get_science_sequences(exposures),
         "arclamps": get_arclamp_sequences(exposures),
@@ -1241,5 +1258,11 @@ def get_almanac_data(
 
                         #if target.sdss_id == -1 and (target.category not in ("sky_apogee", "unplugged")):
                         #    print(f"{observatory} {mjd} Exposure {exposure.exposure}: Could not find SDSS ID for target {identifier} ({key}) {target}")
+
+        if night_overrides:
+            # After sdss_id assignment, so the edited copies keep the
+            # cross-match of the fibers they do not change.
+            from almanac.overrides import apply_fiber_overrides
+            apply_fiber_overrides(exposures, night_overrides)
 
     return (observatory, mjd, exposures, sequences, missing)
