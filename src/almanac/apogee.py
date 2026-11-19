@@ -83,49 +83,62 @@ def any_plate_era(tasks) -> bool:
 
 def _add_apogee_id_rows(lookup: Dict[str, int], rows) -> Dict[str, int]:
     """
-    Add (sdss_id, apogee_id) rows to an APOGEE ID -> SDSS ID lookup.
+    Add (sdss_id, apogee_id[, rank]) rows to an APOGEE ID -> SDSS ID lookup.
 
-    When several rows give the same key, the LARGEST sdss_id wins (AKS
-    2026-11-18: "order by sdss_id and take the larger value"), so the result
-    does not depend on the order in which the database returns rows and is
-    the same for the lookup table and the live join. Such ties exist because
-    `sdss_id_flat.rank` only orders the sdss_ids of one catalogid; one star
-    can have two catalogids (e.g. one per allStar field) with a rank-1
-    sdss_id each (64 allStar apogee_ids as of 2026-11-18).
+    Selection rule (see `best_ranked_lookup`): the best (lowest)
+    `sdss_id_flat.rank` wins; only among rows with that same best rank does
+    the larger sdss_id win (AKS 2026-11-18: the larger-sdss_id tie-break
+    applies "only if there are multiple rank 1 entries"). All queries keep
+    only rank-1 rows, so in practice the tie-break only separates two or more
+    rank-1 sdss_id for one key: `sdss_id_flat.rank` orders the sdss_ids of
+    one catalogid, and one star can have two catalogids (e.g. one per allStar
+    field) with a rank-1 sdss_id each (64 allStar apogee_ids as of
+    2026-11-18). Rows without a rank (the maintainers' lookup table, which
+    holds rank-1 pairs only) count as rank 1. The result does not depend on
+    row order.
 
     Each apogee_id is stored as-is, and also with a leading "2M", "J" or "AP"
     stripped, so that a 2MASS-style designation with its prefix removed (see
     `parse_target_identifier`) finds it.
     """
-    for sdss_id, apogee_id in rows:
-        if len(apogee_id.strip()) <= 2:
-            # There is one problematic entry of "AP" which caused 180,000
-            # fiber-exposures to be assigned to sdss_id 57991461
-            continue
-        _keep_larger(lookup, apogee_id, sdss_id)
-        for prefix in APOGEE_ID_PREFIXES:
-            if apogee_id.startswith(prefix):
-                _keep_larger(lookup, apogee_id[len(prefix):], sdss_id)
+    def _keyed():
+        for row in rows:
+            sdss_id, apogee_id = row[0], row[1]
+            rank = row[2] if len(row) > 2 else 1
+            if len(apogee_id.strip()) <= 2:
+                # There is one problematic entry of "AP" which caused 180,000
+                # fiber-exposures to be assigned to sdss_id 57991461
+                continue
+            yield apogee_id, sdss_id, rank
+            for prefix in APOGEE_ID_PREFIXES:
+                if apogee_id.startswith(prefix):
+                    yield apogee_id[len(prefix):], sdss_id, rank
+
+    lookup.update(best_ranked_lookup(_keyed()))
     return lookup
 
 
-def _keep_larger(lookup: Dict[Any, int], key, sdss_id: int) -> None:
-    """Store `sdss_id` under `key` unless a larger sdss_id is already there."""
-    current = lookup.get(key)
-    if current is None or sdss_id > current:
-        lookup[key] = sdss_id
-
-
-def identifier_lookup(rows) -> Dict[Any, int]:
+def best_ranked_lookup(rows) -> Dict[Any, int]:
     """
-    {identifier: sdss_id} from (identifier, sdss_id) rows; when an
-    identifier has several sdss_id, the largest wins (same rule as
-    `_add_apogee_id_rows`).
+    {identifier: sdss_id} from (identifier, sdss_id, rank) rows.
+
+    For each identifier: the row with the best (lowest) `sdss_id_flat.rank`
+    wins; if several rows share that best rank, the LARGEST sdss_id among
+    them wins. A larger sdss_id never beats a better-ranked one. The result
+    is independent of row order. A missing rank (None) counts as worse than
+    any rank.
     """
-    lookup: Dict[Any, int] = {}
-    for identifier, sdss_id in rows:
-        _keep_larger(lookup, identifier, sdss_id)
-    return lookup
+    best: Dict[Any, Tuple[float, int]] = {}
+    for identifier, sdss_id, rank in rows:
+        r = float("inf") if rank is None else rank
+        current = best.get(identifier)
+        if (
+            current is None
+            or r < current[0]
+            or (r == current[0] and sdss_id > current[1])
+        ):
+            best[identifier] = (r, sdss_id)
+    return {identifier: sdss_id for identifier, (_, sdss_id) in best.items()}
 
 
 def apogee_id_candidates(identifier: str) -> Tuple[str, ...]:
@@ -137,10 +150,12 @@ def apogee_id_candidates(identifier: str) -> Tuple[str, ...]:
     return (identifier, ) + tuple(f"{prefix}{identifier}" for prefix in APOGEE_ID_PREFIXES)
 
 
-def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str]]:
+def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str, int]]:
     """
-    Query (sdss_id, apogee_id) rows linking DR17 allStar entries to SDSS IDs
-    (`sdss_id_flat.rank = 1` only).
+    Query (sdss_id, apogee_id, rank) rows linking DR17 allStar entries to
+    SDSS IDs (`sdss_id_flat.rank = 1` only, as before; the rank is returned
+    so that the fold in `_add_apogee_id_rows` can apply "best rank first"
+    explicitly rather than relying on this filter).
 
     :param apogee_ids:
         If given, only rows whose allStar apogee_id is in this collection are
@@ -177,7 +192,8 @@ def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tu
             catalogdb.SDSS_ID_flat
             .select(
                 catalogdb.SDSS_ID_flat.sdss_id,
-                catalogdb.AllStar_DR17_synspec_rev1.apogee_id
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id,
+                catalogdb.SDSS_ID_flat.rank,
             )
             .join(
                 catalogdb.SDSS_ID_To_Catalog,
@@ -210,7 +226,8 @@ def _query_apogee_id_rows(apogee_ids: Optional[Sequence[str]] = None) -> List[Tu
             catalogdb.AllStar_DR17_synspec_rev1
             .select(
                 catalogdb.SDSS_ID_flat.sdss_id,
-                catalogdb.AllStar_DR17_synspec_rev1.apogee_id
+                catalogdb.AllStar_DR17_synspec_rev1.apogee_id,
+                catalogdb.SDSS_ID_flat.rank,
             )
             .join(
                 CatalogToAllStar_DR17_synspec_rev1,
@@ -525,6 +542,11 @@ def _query_apogee_id_rows_from_view(view: str, apogee_ids: Optional[Sequence[str
     """
     (sdss_id, apogee_id) rows from the materialized view: all rows, or only
     those whose apogee_id is in `apogee_ids` (`= ANY(array)`, via its index).
+
+    The relation has no rank column: it holds only rank-1 pairs (the same
+    `sdss_id_flat.rank = 1` join; checked row by row against the live join
+    for all 657,134 apogee_ids on 2026-11-18). `_add_apogee_id_rows` treats
+    rows without a rank as rank 1.
     """
     quoted = _quote_view_name(view)
     if apogee_ids is None:
@@ -612,8 +634,8 @@ def get_apogee_id_lookup(
     apogee_id that can produce the key (the identifier, or the identifier
     with "2M", "J" or "AP" prepended) is fetched in the same query, and the
     rows are folded with the same rules (bad short entries such as "AP" are
-    skipped; when several rows give the same key, the largest sdss_id
-    wins, as in the full lookup).
+    skipped; best rank first, and among rows of equal best rank the largest
+    sdss_id, as in the full lookup).
 
     The returned dictionary is the process-wide memo; callers must not
     mutate it. Only requested identifiers are guaranteed to be present.
@@ -651,6 +673,98 @@ def get_apogee_id_lookup(
         f"in {time() - t_start:.2f} s"
     )
     return _TARGETED_APOGEE_ID_LOOKUP
+
+
+# ---------------------------------------------------------------------------
+# Identifier -> sdss_id lookups for the catalogid, Gaia DR2 and 2MASS paths.
+#
+# Each query keeps only `sdss_id_flat.rank = 1` rows (as before 2026-11-18)
+# and also returns the rank; `best_ranked_lookup` then picks, per
+# identifier, the best rank and, only among rows of that equal best rank,
+# the largest sdss_id. With the rank-1 filter, the tie-break only acts when
+# an identifier reaches two or more rank-1 sdss_id (e.g. a Gaia DR2 source
+# or 2MASS designation cross-matched to two catalogids).
+# ---------------------------------------------------------------------------
+
+def catalogid_sdss_id_lookup(catalogids) -> Dict[int, int]:
+    """{catalogid: sdss_id} for `catalogids` (rank 1; see above)."""
+    from almanac.database import catalogdb
+
+    q = (
+        catalogdb.SDSS_ID_flat
+        .select(
+            catalogdb.SDSS_ID_flat.catalogid,
+            catalogdb.SDSS_ID_flat.sdss_id,
+            catalogdb.SDSS_ID_flat.rank,
+        )
+        .where(
+            catalogdb.SDSS_ID_flat.catalogid.in_(tuple(catalogids))
+        &   (catalogdb.SDSS_ID_flat.rank == 1)
+        )
+        .tuples()
+    )
+    return best_ranked_lookup(_execute_query(q))
+
+
+def gaia_dr2_sdss_id_lookup(source_ids) -> Dict[int, int]:
+    """{gaia_dr2_source_id: sdss_id} for `source_ids` (rank 1; see above)."""
+    from almanac.database import catalogdb
+
+    q = (
+        catalogdb.SDSS_ID_flat
+        .select(
+            catalogdb.CatalogToGaia_DR2.target,
+            catalogdb.SDSS_ID_flat.sdss_id,
+            catalogdb.SDSS_ID_flat.rank,
+        )
+        .join(
+            catalogdb.CatalogToGaia_DR2,
+            on=(
+                catalogdb.SDSS_ID_flat.catalogid == catalogdb.CatalogToGaia_DR2.catalog
+            )
+        )
+        .where(
+            catalogdb.CatalogToGaia_DR2.target.in_(tuple(source_ids))
+        &   (catalogdb.SDSS_ID_flat.rank == 1)
+        )
+        .tuples()
+    )
+    return best_ranked_lookup(_execute_query(q))
+
+
+def twomass_sdss_id_lookup(designations) -> Dict[str, int]:
+    """{2MASS PSC designation: sdss_id} for `designations` (rank 1; see above)."""
+    from almanac.database import catalogdb
+
+    q = (
+        catalogdb.SDSS_ID_flat
+        .select(
+            catalogdb.TwoMassPSC.designation,
+            catalogdb.SDSS_ID_flat.sdss_id,
+            catalogdb.SDSS_ID_flat.rank,
+        )
+        .join(
+            catalogdb.CatalogToTwoMassPSC,
+            on=(
+                catalogdb.SDSS_ID_flat.catalogid
+                == catalogdb.CatalogToTwoMassPSC.catalogid
+            ),
+        )
+        .join(
+            catalogdb.TwoMassPSC,
+            on=(
+                catalogdb.CatalogToTwoMassPSC.target_id
+                == catalogdb.TwoMassPSC.pts_key
+            ),
+        )
+        .where(
+            catalogdb.TwoMassPSC.designation.in_(tuple(designations))
+        &   (catalogdb.SDSS_ID_flat.rank == 1)
+        )
+        .tuples()
+    )
+    return best_ranked_lookup(_execute_query(q))
+
 
 
 def get_unique_exposure_paths(paths: List[str]) -> List[str]:
@@ -1088,46 +1202,10 @@ def get_almanac_data(
 
             lookup = {}
             if "catalogid" in identifiers and is_database_available:
-                q = (
-                    catalogdb.SDSS_ID_flat
-                    .select(
-                        catalogdb.SDSS_ID_flat.sdss_id,
-                        catalogdb.SDSS_ID_flat.catalogid
-                    )
-                    .where(
-                        catalogdb.SDSS_ID_flat.catalogid.in_(tuple(identifiers["catalogid"]))
-                    &   (catalogdb.SDSS_ID_flat.rank == 1)
-                    )
-                    .tuples()
-                )
-                lookup["catalogid"] = identifier_lookup(
-                    (catalogid, sdss_id) for sdss_id, catalogid in _execute_query(q)
-                )
+                lookup["catalogid"] = catalogid_sdss_id_lookup(identifiers["catalogid"])
 
             if "gaia_dr2" in identifiers and is_database_available:
-                q = (
-                    catalogdb.SDSS_ID_flat
-                    .select(
-                        catalogdb.SDSS_ID_flat.sdss_id,
-                        catalogdb.CatalogToGaia_DR2.target
-                    )
-                    .join(
-                        catalogdb.CatalogToGaia_DR2,
-                        on=(
-                            catalogdb.SDSS_ID_flat.catalogid == catalogdb.CatalogToGaia_DR2.catalog
-                        )
-                    )
-                    .where(
-                        catalogdb.CatalogToGaia_DR2.target.in_(tuple(identifiers["gaia_dr2"]))
-                    &   (catalogdb.SDSS_ID_flat.rank == 1)
-                    )
-                    .tuples()
-                )
-                lookup["gaia_dr2"] = identifier_lookup(
-                    (gaia_dr2_source_id, sdss_id)
-                    for sdss_id, gaia_dr2_source_id in _execute_query(q)
-                )
-
+                lookup["gaia_dr2"] = gaia_dr2_sdss_id_lookup(identifiers["gaia_dr2"])
 
             if "coordinate" in identifiers and is_database_available:
                 # Query only the APOGEE IDs this night needs (memoised per
@@ -1137,33 +1215,7 @@ def get_almanac_data(
 
                 if remaining:
                     # For remaining things, check 2MASS.
-                    q = (
-                        catalogdb.SDSS_ID_flat
-                        .select(
-                            catalogdb.TwoMassPSC.designation,
-                            catalogdb.SDSS_ID_flat.sdss_id
-                        )
-                        .join(
-                            catalogdb.CatalogToTwoMassPSC,
-                            on=(
-                                catalogdb.SDSS_ID_flat.catalogid
-                                == catalogdb.CatalogToTwoMassPSC.catalogid
-                            ),
-                        )
-                        .join(
-                            catalogdb.TwoMassPSC,
-                            on=(
-                                catalogdb.CatalogToTwoMassPSC.target_id
-                                == catalogdb.TwoMassPSC.pts_key
-                            ),
-                        )
-                        .where(
-                            catalogdb.TwoMassPSC.designation.in_(tuple(remaining))
-                        &   (catalogdb.SDSS_ID_flat.rank == 1)
-                        )
-                        .tuples()
-                    )
-                    lookup["twomass_psc"] = identifier_lookup(_execute_query(q))
+                    lookup["twomass_psc"] = twomass_sdss_id_lookup(remaining)
 
             # Add sdss_id to targets
             for si, ei in sequences["objects"]:

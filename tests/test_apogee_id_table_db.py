@@ -64,7 +64,8 @@ def _candidates(apogee, identifiers):
 
 def _row_sets(rows):
     out = {}
-    for sdss_id, apogee_id in rows:
+    for row in rows:
+        sdss_id, apogee_id = row[0], row[1]
         out.setdefault(apogee_id, set()).add(sdss_id)
     return out
 
@@ -93,3 +94,24 @@ def test_same_sdss_id_as_live_join(apogee):
         assert table[identifier] == join[identifier] > 0, identifier
     for identifier in NO_MATCH + NOT_IN_ALLSTAR:
         assert identifier not in table and identifier not in join
+
+
+def test_live_join_rows_are_rank_1(apogee):
+    rows = apogee._query_apogee_id_rows(_candidates(apogee, APO + AMBIGUOUS))
+    assert rows and all(row[2] == 1 for row in rows)
+
+
+def test_rank_1_tie_takes_larger_sdss_id(apogee):
+    # AP00451807+4047096: two rank-1 sdss_id (129046733, 129048422).
+    candidates = _candidates(apogee, AMBIGUOUS)
+    for fetch in (
+        lambda c: apogee._query_apogee_id_rows_from_view(TABLE, c),
+        apogee._query_apogee_id_rows,
+    ):
+        assert apogee._add_apogee_id_rows({}, fetch(candidates))["00451807+4047096"] == 129048422
+
+
+def test_catalogid_path_keeps_rank_1_over_larger_rank_2(apogee):
+    # catalogid 63050395066243429 has sdss_id 70149305 (rank 1) and the
+    # larger 70149306 (rank 2): rank wins, the larger sdss_id must not.
+    assert apogee.catalogid_sdss_id_lookup([63050395066243429]) == {63050395066243429: 70149305}
