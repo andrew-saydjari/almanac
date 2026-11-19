@@ -147,14 +147,14 @@ class TestViewPresent:
 class TestTieBreakSameOnBothPaths:
     def test_view_rows_reversed_equal_join(self, env, monkeypatch):
         # The table and the live join may return tied rows in different
-        # orders; the larger sdss_id wins on both paths.
+        # orders; the smaller sdss_id wins on both paths.
         join, view = env(view_rows=_distinct(ROWS)[::-1])
         from_view = dict(get_apogee_id_lookup(ALL_IDENTIFIERS))
         apogee.clear_targeted_apogee_id_lookup()
         apogee.force_live_apogee_id_join(True)
         from_join = dict(get_apogee_id_lookup(ALL_IDENTIFIERS))
         assert from_view == from_join
-        assert from_view["00000005+0000005"] == 106
+        assert from_view["00000005+0000005"] == 105
 
 
 class TestViewAbsentFallback:
