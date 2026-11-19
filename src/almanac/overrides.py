@@ -1,0 +1,485 @@
+"""
+Explicit, version-controlled special cases for individual exposures.
+
+Some exposures cannot be described correctly from their raw headers and the
+plugmap / confSummary files alone. The observers' logs say so, for example:
+
+* on APO MJD 55755 the telescope was pointed so that the asteroid Vesta fell
+  on single plugged fibers of plate 5099, whose plugmap assigns those fibers
+  to bulge stars; every other fiber looked at random sky;
+* an FPS exposure whose header names a new configuration while the robots
+  were still at the previous one.
+
+Such cases are listed in ``almanac/etc/exposure_overrides.yaml``. Each entry
+names an observatory, an MJD, a set of exposures and one action:
+
+``retarget_fibers``
+    The listed fibers saw a named object that is not the catalogue target
+    (e.g. ``VESTA``). Those fibers get category ``retargeted``, ``sdss_id``
+    -1 and ``override_target`` = the name. ``other_fibers`` must say what
+    happened to the remaining fibers: ``keep`` (unchanged) or ``offtarget``
+    (the telescope was pointed elsewhere, so no fiber that asserts a target
+    identity saw its target; they become ``offtarget`` with ``sdss_id`` -1).
+    The affected exposures get their own fiber table, named by the exposure
+    column ``fiber_map_key``.
+``use_config``
+    The exposure's fibers were at configuration ``config_id``, not at the one
+    in the header.
+``use_previous_config``
+    The exposure's fibers were still at the configuration of the previous
+    object exposure of the night with a different configuration.
+``mark_exposure``
+    Information only: the exposure is labelled, nothing else changes.
+``not_science``
+    The exposure is not usable as a science exposure: ``flagged_bad`` is set.
+
+Every entry carries a free-text ``reason`` and a ``source`` (the file and a
+verbatim quote). An FPS entry may also record ``recorded_config`` (the
+configuration in the header) and ``actual_config`` (the configuration the
+fiber positioners were really at). They are optional and must be given
+together; when present, the header configuration of every listed exposure
+must equal ``recorded_config`` (checked when the entry is applied), and for
+``use_config`` ``actual_config`` must equal ``config_id``. They let a
+``not_science`` entry be switched to ``use_config`` later without
+re-deriving the configurations. Overrides are applied in one place,
+:func:`almanac.apogee.get_almanac_data`, and are never silent: affected
+exposures carry the entry ids in ``override_ids`` and what was done in
+``override_actions``; affected fibers carry ``override_id``. They can be
+switched off (``almanac --no-overrides``) so that their effect can be diffed.
+A malformed file, an unknown action or key, or an entry that names an
+exposure that does not exist all raise :class:`OverrideError`.
+"""
+
+import hashlib
+import re
+from dataclasses import dataclass, field
+from importlib import resources
+from typing import Dict, List, Optional, Tuple
+
+import yaml
+
+#: Category given to a fiber that an override says saw a named, non-catalogue
+#: object (see ``retarget_fibers``). Never cross-matched to an ``sdss_id``.
+from almanac.data_models.types import RETARGETED_CATEGORY  # noqa: E402
+
+ACTIONS = (
+    "retarget_fibers",
+    "use_config",
+    "use_previous_config",
+    "mark_exposure",
+    "not_science",
+)
+
+_COMMON_REQUIRED = {"id", "observatory", "mjd", "exposures", "action", "reason", "source"}
+_ACTION_KEYS = {
+    "retarget_fibers": ({"fibers", "other_fibers"}, set()),
+    "use_config": ({"config_id"}, set()),
+    "use_previous_config": (set(), set()),
+    "mark_exposure": (set(), set()),
+    "not_science": (set(), set()),
+}
+_OPTIONAL = {"notes", "recorded_config", "actual_config"}
+_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.\-]*$")
+_CONFIG_ACTIONS = ("use_config", "use_previous_config")
+
+
+class OverrideError(ValueError):
+    """An override file or entry is malformed, inconsistent, or does not apply."""
+
+
+@dataclass(frozen=True)
+class Override:
+    id: str
+    observatory: str
+    mjd: int
+    exposures: Tuple[int, ...]
+    action: str
+    reason: str
+    source_file: str
+    source_quote: str
+    fibers: Dict[int, str] = field(default_factory=dict)
+    other_fibers: str = "keep"
+    config_id: int = -1
+    notes: str = ""
+    recorded_config: int = -1
+    actual_config: int = -1
+
+
+def parse_exposures(value, entry_id="?") -> Tuple[int, ...]:
+    """
+    Parse an exposure specification: an int, a list of ints, or a string such
+    as ``"19-23,29"``. Returns a sorted tuple of unique positive ints.
+    """
+    items = []
+    if isinstance(value, bool):
+        raise OverrideError(f"{entry_id}: exposures must be ints, not {value!r}")
+    if isinstance(value, int):
+        items = [value]
+    elif isinstance(value, str):
+        for part in value.split(","):
+            part = part.strip()
+            m = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
+            if m:
+                a, b = int(m.group(1)), int(m.group(2))
+                if b < a:
+                    raise OverrideError(f"{entry_id}: bad exposure range {part!r}")
+                items.extend(range(a, b + 1))
+            elif re.fullmatch(r"\d+", part):
+                items.append(int(part))
+            else:
+                raise OverrideError(f"{entry_id}: cannot parse exposures {value!r}")
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            items.extend(parse_exposures(v, entry_id))
+    else:
+        raise OverrideError(f"{entry_id}: cannot parse exposures {value!r}")
+    if not items or any(i < 1 for i in items):
+        raise OverrideError(f"{entry_id}: exposures must be positive, got {value!r}")
+    return tuple(sorted(set(items)))
+
+
+def _validate_entry(raw) -> Override:
+    if not isinstance(raw, dict):
+        raise OverrideError(f"Override entry must be a mapping, got {raw!r}")
+    entry_id = raw.get("id", "?")
+    if not isinstance(entry_id, str) or not _ID_PATTERN.match(entry_id):
+        raise OverrideError(f"Override id must match {_ID_PATTERN.pattern}, got {entry_id!r}")
+
+    action = raw.get("action")
+    if action not in ACTIONS:
+        raise OverrideError(f"{entry_id}: unknown action {action!r}; allowed: {', '.join(ACTIONS)}")
+
+    required_extra, optional_extra = _ACTION_KEYS[action]
+    required = _COMMON_REQUIRED | required_extra
+    allowed = required | optional_extra | _OPTIONAL
+    keys = set(raw)
+    missing = required - keys
+    if missing:
+        raise OverrideError(f"{entry_id}: missing key(s) {sorted(missing)}")
+    unknown = keys - allowed
+    if unknown:
+        raise OverrideError(f"{entry_id}: unknown key(s) {sorted(unknown)} for action {action!r}")
+
+    observatory = raw["observatory"]
+    if observatory not in ("apo", "lco"):
+        raise OverrideError(f"{entry_id}: observatory must be 'apo' or 'lco', got {observatory!r}")
+    mjd = raw["mjd"]
+    if isinstance(mjd, bool) or not isinstance(mjd, int) or mjd < 50000:
+        raise OverrideError(f"{entry_id}: mjd must be an int, got {mjd!r}")
+    exposures = parse_exposures(raw["exposures"], entry_id)
+
+    reason = raw["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise OverrideError(f"{entry_id}: reason must be non-empty text")
+
+    source = raw["source"]
+    if not isinstance(source, dict) or set(source) != {"file", "quote"}:
+        raise OverrideError(f"{entry_id}: source must be a mapping with exactly 'file' and 'quote'")
+    for k in ("file", "quote"):
+        if not isinstance(source[k], str) or not source[k].strip():
+            raise OverrideError(f"{entry_id}: source.{k} must be non-empty text")
+
+    kwds = {}
+    if action == "retarget_fibers":
+        fibers = raw["fibers"]
+        if not isinstance(fibers, dict) or not fibers:
+            raise OverrideError(f"{entry_id}: fibers must be a non-empty mapping fiber_id -> target name")
+        parsed = {}
+        for k, v in fibers.items():
+            if isinstance(k, bool) or not isinstance(k, int) or not (1 <= k <= 300):
+                raise OverrideError(f"{entry_id}: fiber ids must be ints in 1..300, got {k!r}")
+            if not isinstance(v, str) or not v.strip():
+                raise OverrideError(f"{entry_id}: fiber {k} needs a target name")
+            parsed[k] = v.strip()
+        other = raw["other_fibers"]
+        if other not in ("keep", "offtarget"):
+            raise OverrideError(f"{entry_id}: other_fibers must be 'keep' or 'offtarget', got {other!r}")
+        kwds.update(fibers=parsed, other_fibers=other)
+    elif action == "use_config":
+        cid = raw["config_id"]
+        if isinstance(cid, bool) or not isinstance(cid, int) or cid <= 0:
+            raise OverrideError(f"{entry_id}: config_id must be a positive int, got {cid!r}")
+        kwds.update(config_id=cid)
+
+    notes = raw.get("notes", "")
+    if not isinstance(notes, str):
+        raise OverrideError(f"{entry_id}: notes must be text")
+
+    configs = [k for k in ("recorded_config", "actual_config") if k in raw]
+    if configs:
+        if len(configs) != 2:
+            raise OverrideError(f"{entry_id}: recorded_config and actual_config must be given together")
+        if action == "retarget_fibers":
+            raise OverrideError(f"{entry_id}: recorded_config/actual_config are for FPS configuration entries")
+        for k in configs:
+            v = raw[k]
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                raise OverrideError(f"{entry_id}: {k} must be a positive int, got {v!r}")
+        if raw["recorded_config"] == raw["actual_config"]:
+            raise OverrideError(f"{entry_id}: recorded_config and actual_config must differ")
+        if action == "use_config" and raw["actual_config"] != kwds["config_id"]:
+            raise OverrideError(f"{entry_id}: actual_config must equal config_id for use_config")
+        kwds.update(recorded_config=raw["recorded_config"], actual_config=raw["actual_config"])
+
+    return Override(
+        id=entry_id,
+        observatory=observatory,
+        mjd=mjd,
+        exposures=exposures,
+        action=action,
+        reason=reason.strip(),
+        source_file=source["file"].strip(),
+        source_quote=source["quote"].strip(),
+        notes=notes,
+        **kwds,
+    )
+
+
+def _check_conflicts(entries: List[Override]) -> None:
+    seen_ids = set()
+    config_actions = {}
+    retargeted = {}
+    for e in entries:
+        if e.id in seen_ids:
+            raise OverrideError(f"Duplicate override id {e.id!r}")
+        seen_ids.add(e.id)
+        for x in e.exposures:
+            key = (e.observatory, e.mjd, x)
+            if e.action in _CONFIG_ACTIONS:
+                if key in config_actions:
+                    raise OverrideError(
+                        f"{e.id}: {key} already has a configuration override ({config_actions[key]})"
+                    )
+                config_actions[key] = e.id
+            if e.action == "retarget_fibers":
+                for prev_id, prev in retargeted.get(key, []):
+                    if prev.other_fibers == "offtarget" or e.other_fibers == "offtarget" or set(prev.fibers) & set(e.fibers):
+                        raise OverrideError(
+                            f"{e.id}: conflicts with {prev_id} on {key}; "
+                            f"combine the fibers into one entry"
+                        )
+                retargeted.setdefault(key, []).append((e.id, e))
+
+
+def parse_overrides(text: str) -> List[Override]:
+    """Parse and validate the YAML text of an override file."""
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise OverrideError(f"Override file is not valid YAML: {e}") from e
+    if not isinstance(doc, dict) or set(doc) != {"version", "overrides"}:
+        raise OverrideError("Override file must be a mapping with exactly 'version' and 'overrides'")
+    if doc["version"] != 1:
+        raise OverrideError(f"Unsupported override file version {doc['version']!r}")
+    raw_entries = doc["overrides"] or []
+    if not isinstance(raw_entries, list):
+        raise OverrideError("'overrides' must be a list")
+    entries = [_validate_entry(raw) for raw in raw_entries]
+    _check_conflicts(entries)
+    return entries
+
+
+def _default_text() -> str:
+    return (resources.files("almanac.etc") / "exposure_overrides.yaml").read_text()
+
+
+_cache: Optional[Tuple[str, List[Override]]] = None
+
+
+def load_overrides(text: Optional[str] = None) -> List[Override]:
+    """Load (and cache) the packaged override file, or parse ``text``."""
+    global _cache
+    if text is not None:
+        return parse_overrides(text)
+    if _cache is None:
+        t = _default_text()
+        _cache = (t, parse_overrides(t))
+    return _cache[1]
+
+
+def overrides_sha256() -> str:
+    """SHA-256 of the packaged override file (recorded in the output)."""
+    return hashlib.sha256(_default_text().encode()).hexdigest()
+
+
+def overrides_attrs(enabled: bool) -> Dict[str, str]:
+    """Per-night HDF5 attributes that record whether overrides were applied."""
+    attrs = {"exposure_overrides": "enabled" if enabled else "disabled"}
+    if enabled:
+        attrs["exposure_overrides_sha256"] = overrides_sha256()
+    return attrs
+
+
+def overrides_for(observatory: str, mjd: int, entries: Optional[List[Override]] = None) -> List[Override]:
+    entries = load_overrides() if entries is None else entries
+    return [e for e in entries if e.observatory == observatory and e.mjd == int(mjd)]
+
+
+def _set_targets(exposure, targets) -> None:
+    """Replace an exposure's targets, dropping the cached `targets` property."""
+    exposure._targets = targets
+    exposure.__dict__.pop("targets", None)
+
+
+def _base_key(exposure) -> str:
+    return str(exposure.config_id if exposure.fps else exposure.plate_id)
+
+
+def _note(exposure, entry: Override, action_text: str) -> None:
+    ids = [i for i in exposure.override_ids.split(";") if i]
+    acts = [a for a in exposure.override_actions.split(";") if a]
+    ids.append(entry.id)
+    acts.append(action_text)
+    exposure.override_ids = ";".join(ids)
+    exposure.override_actions = ";".join(acts)
+
+
+def _exposures_by_number(exposures, entry: Override):
+    by_number = {e.exposure: e for e in exposures if e.image_type != "missing"}
+    absent = [x for x in entry.exposures if x not in by_number]
+    if absent:
+        raise OverrideError(
+            f"{entry.id}: exposure(s) {absent} not found on {entry.observatory}/{entry.mjd}"
+        )
+    return [by_number[x] for x in entry.exposures]
+
+
+def _config_ids_from_summary(exposure) -> Dict[str, int]:
+    """design_id / field_id from the header of the (new) confSummary file, if present."""
+    try:
+        from pydl.pydlutils.yanny import yanny
+        par = yanny(exposure.config_summary_path)
+    except Exception:
+        return {}
+    out = {}
+    for key in ("design_id", "field_id"):
+        try:
+            out[key] = int(par[key])
+        except Exception:
+            pass
+    return out
+
+
+def apply_exposure_overrides(exposures, entries: List[Override]) -> None:
+    """
+    Apply the exposure-level actions (everything except the fiber edits of
+    ``retarget_fibers``) in place. Must run before sequences are built,
+    because a configuration override changes ``config_id``.
+    """
+    for entry in entries:
+        targets = _exposures_by_number(exposures, entry)
+        if entry.recorded_config > 0:
+            for e in targets:
+                if not e.fps or e.config_id != entry.recorded_config:
+                    raise OverrideError(
+                        f"{entry.id}: exposure {e.exposure} has configuration {e.config_id} "
+                        f"(fps={e.fps}), not recorded_config {entry.recorded_config}"
+                    )
+        if entry.action == "mark_exposure":
+            for e in targets:
+                _note(e, entry, "mark_exposure")
+        elif entry.action == "not_science":
+            for e in targets:
+                e._override_not_science = True
+                _note(e, entry, "not_science")
+        elif entry.action == "retarget_fibers":
+            for e in targets:
+                if e.image_type != "object":
+                    raise OverrideError(f"{entry.id}: exposure {e.exposure} is {e.image_type}, not object")
+                fibers = ",".join(f"{k}={v}" for k, v in sorted(entry.fibers.items()))
+                _note(e, entry, f"retarget_fibers({fibers};others={entry.other_fibers})")
+        elif entry.action in _CONFIG_ACTIONS:
+            for e in targets:
+                if e.image_type != "object" or not e.fps:
+                    raise OverrideError(
+                        f"{entry.id}: exposure {e.exposure} must be an FPS object exposure for {entry.action}"
+                    )
+                header_config = e.config_id
+                if entry.action == "use_config":
+                    new_config = entry.config_id
+                else:
+                    earlier = [
+                        p for p in exposures
+                        if p.exposure < e.exposure and p.image_type == "object"
+                        and p.config_id > 0 and p.config_id != header_config
+                    ]
+                    if not earlier:
+                        raise OverrideError(
+                            f"{entry.id}: no earlier object exposure with another configuration "
+                            f"before exposure {e.exposure}"
+                        )
+                    new_config = earlier[-1].config_id
+                e.config_id = new_config
+                _set_targets(e, None)
+                for k, v in _config_ids_from_summary(e).items():
+                    setattr(e, k, v)
+                _note(e, entry, f"{entry.action}({header_config}->{new_config})")
+
+
+def apply_fiber_overrides(exposures, entries: List[Override]) -> None:
+    """
+    Apply the fiber edits of ``retarget_fibers`` entries in place. Must run
+    after ``sdss_id`` assignment: each affected exposure gets a copy of the
+    fiber table that would otherwise be written for its plate/configuration,
+    edited, and stored under its own ``fiber_map_key``.
+    """
+    entries = [e for e in entries if e.action == "retarget_fibers"]
+    if not entries:
+        return
+
+    # The table io would write for each key: that of the first exposure with
+    # that key and any targets (it carries the sdss_id assignments).
+    reference = {}
+    for e in exposures:
+        if e.image_type != "object":
+            continue
+        key = _base_key(e)
+        if key not in reference and e.targets:
+            reference[key] = e.targets
+
+    affected = {}
+    for entry in entries:
+        for e in _exposures_by_number(exposures, entry):
+            affected.setdefault(e.exposure, (e, []))[1].append(entry)
+
+    for number, (e, es) in sorted(affected.items()):
+        key = _base_key(e)
+        if key not in reference:
+            raise OverrideError(f"{es[0].id}: no fiber table for {key} on exposure {number}")
+        new = [t.model_copy(deep=True) for t in reference[key]]
+        by_fiber = {t.fiber_id: t for t in new}
+        retarget = {}
+        for entry in es:
+            for fiber, name in entry.fibers.items():
+                if fiber not in by_fiber:
+                    raise OverrideError(f"{entry.id}: fiber {fiber} not in the fiber table of exposure {number}")
+                retarget[fiber] = (entry, name)
+        offtarget_entry = next((x for x in es if x.other_fibers == "offtarget"), None)
+
+        for t in new:
+            if t.fiber_id in retarget:
+                entry, name = retarget[t.fiber_id]
+                t.original_category = t.category if t.category != "" else ""
+                t.category = RETARGETED_CATEGORY
+                t.sdss_id = -1
+                t.override_id = entry.id
+                t.override_target = name
+            elif offtarget_entry is not None:
+                from almanac.data_models.types import asserts_target_identity, OFF_TARGET_CATEGORY
+                if asserts_target_identity(t.category):
+                    t.original_category = t.category
+                    t.category = OFF_TARGET_CATEGORY
+                    t.sdss_id = -1
+                    t.override_id = offtarget_entry.id
+
+        _set_targets(e, tuple(sorted(new, key=lambda t: t.fiber_id)))
+        e._fiber_map_key = f"{key}.override.{'+'.join(x.id for x in es)}"
+
+    # Make sure the unmodified table for each key is still written from a
+    # target list that carries the sdss_id assignments, even when the first
+    # exposure of a sequence is one of the overridden exposures.
+    for key, targets in reference.items():
+        for e in exposures:
+            if e.image_type == "object" and _base_key(e) == key and e.exposure not in affected:
+                _set_targets(e, targets)
+                break

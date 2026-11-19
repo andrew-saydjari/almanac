@@ -1,0 +1,1315 @@
+# Exposure overrides applied by almanac (see almanac/overrides.py).
+# Add an entry ONLY when the evidence is certain; quote the source verbatim.
+# Disable all of them with `almanac --no-overrides`.
+#
+# ===========================================================================
+# NOTE: "robots not moved" entries are marked bad (not_science) for 0.4.1.
+# ===========================================================================
+# The block between the BEGIN/END robots-not-moved markers below is generated
+# by scripts/robots_not_moved/robots_not_moved.py (see the README there for
+# the rule). Each entry is an FPS exposure whose header records a newly
+# loaded configuration B (recorded_config) while the fiber positioners had
+# not moved and were still at the previous configuration A (actual_config),
+# so the light in the fibers does not belong to the recorded targets.
+#
+# For 0.4.1 all of them are marked bad with `not_science`, as the
+# conservative choice. The light is real starlight from configuration A,
+# and the 2026-11-19 fiber-level data check recovered the true (A) target
+# for most affected fibers. After 0.4.1 we want to come back and try to save
+# some of them by switching entries to `use_config <A>` (config_id =
+# actual_config) for the WHOLE exposure, not individual fibers: fibers that
+# B treats as sky carried A's stars, so B's sky fibers are wrong too.
+# Only exposures whose data check says MATCHES_A are candidates for that.
+# ===========================================================================
+version: 1
+overrides:
+  - id: apo-55755-aadaf-vesta-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "19-23,29"
+    action: retarget_fibers
+    fibers: {203: "VESTA"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that VESTA fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "19 Vesta goes to fiber 203. This one is extremely weak, signal ~ 45 / 20 Vesta goes to fiber 203, zero signal / 21 zero signal again... / 22 Vesta to fiber 203. Signal 380. / 23 Vesta to fiber 203. Signal 3500. / 29 Vesta fiber 203 signal 2400"
+  - id: apo-55755-aadaf-vesta-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "30-31"
+    action: retarget_fibers
+    fibers: {192: "VESTA"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that VESTA fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "30 Vesta fiber 192 signal  700 / 31 Vesta fiber 192 signal  200. Asteroid drifted away."
+  - id: apo-55755-aadaf-vesta-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "32-33"
+    action: retarget_fibers
+    fibers: {295: "VESTA"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that VESTA fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "32 Vesta fiber 295 signal 1100 / 33 Vesta fiber 295 signal  140"
+  - id: apo-55755-aadaf-betaoph-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "24"
+    action: retarget_fibers
+    fibers: {203: "beta Oph"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that beta Oph fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "24 (wrong comment) beta Oph in fiber 203. Strong saturation - the sky is clear in this part :("
+  - id: apo-55755-aadaf-hd196944-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "25"
+    action: retarget_fibers
+    fibers: {203: "HD 196944"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HD 196944 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "25 HD 196944  fiber 203 signal 1100"
+  - id: apo-55755-aadaf-hd196944-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "26"
+    action: retarget_fibers
+    fibers: {192: "HD 196944"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HD 196944 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "26 HD 196944  fiber 192 signal 1600"
+  - id: apo-55755-aadaf-hd196944-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "27-28"
+    action: retarget_fibers
+    fibers: {295: "HD 196944"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HD 196944 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "27 HD 196944  fiber 295 signal 900 / 28 HD 196944  fiber 295 signal 2100"
+  - id: apo-55755-aadaf-hip98456-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "34"
+    action: retarget_fibers
+    fibers: {203: "HIP 98456"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 98456 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "34 HIP 98456 fiber 203"
+  - id: apo-55755-aadaf-hip98456-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "35"
+    action: retarget_fibers
+    fibers: {192: "HIP 98456"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 98456 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "35 HIP 98456 fiber 192"
+  - id: apo-55755-aadaf-hip98456-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "36"
+    action: retarget_fibers
+    fibers: {295: "HIP 98456"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 98456 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "36 HIP 98456 fiber 295"
+  - id: apo-55755-aadaf-hip99987-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "37"
+    action: retarget_fibers
+    fibers: {203: "HIP 99987"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 99987 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "37 HIP 99987 fiber 203"
+  - id: apo-55755-aadaf-hip99987-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "38"
+    action: retarget_fibers
+    fibers: {192: "HIP 99987"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 99987 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "38 HIP 99987 fiber 192"
+  - id: apo-55755-aadaf-hip99987-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "39"
+    action: retarget_fibers
+    fibers: {295: "HIP 99987"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 99987 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "39 HIP 99987 fiber 295"
+  - id: apo-55755-aadaf-hip101226-f203
+    observatory: apo
+    mjd: 55755
+    exposures: "40"
+    action: retarget_fibers
+    fibers: {203: "HIP 101226"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 101226 fell on fiber 203. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "40 HIP 101226 fiber 203"
+  - id: apo-55755-aadaf-hip101226-f192
+    observatory: apo
+    mjd: 55755
+    exposures: "41"
+    action: retarget_fibers
+    fibers: {192: "HIP 101226"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 101226 fell on fiber 192. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "41 HIP 101226 fiber 192"
+  - id: apo-55755-aadaf-hip101226-f295
+    observatory: apo
+    mjd: 55755
+    exposures: "42"
+    action: retarget_fibers
+    fibers: {295: "HIP 101226"}
+    other_fibers: offtarget
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed so that HIP 101226 fell on fiber 295. The plugmap's
+      bulge star was not in that fiber, and every other fiber looked at unrelated sky
+      (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "42 HIP 101226 fiber 295"
+  - id: apo-55755-skyflat-as-object
+    observatory: apo
+    mjd: 55755
+    exposures: "18,44"
+    action: not_science
+    reason: >-
+      Sky flats taken with the telescope offset 0.01 deg in RA (header RA 0.011 deg from the
+      plate centre for 18; 44 is at the HIP 101226 position) but labelled OBJECT with plate 5099.
+      No plugmap target was in its fiber. Exposure 43, the same kind of frame, is already
+      classified twilightflat by almanac from its comment.
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "18 This is Sky Flat. The fits comment is wrong. / 44 sky exp, offset 0.01 deg RA - sky flat again with consistent # of reads=30"
+  # BEGIN robots-not-moved (generated by scripts/robots_not_moved/robots_not_moved.py overrides; do not edit by hand)
+  - id: apo-59630-robots-not-moved-a3625-b3628
+    observatory: apo
+    mjd: 59630
+    exposures: "25-26"
+    action: not_science
+    recorded_config: 3628
+    actual_config: 3625
+    reason: >-
+      Robots not moved. Configuration 3628 (B, recorded in the header) was loaded 0.5 min before
+      exposure 25 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3625 (A, the configuration the robots were last moved
+      to). 261 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 25
+      NOT_TESTED (0.4.0 class NOLIGHT); 26 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2022-02-19T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-20T05:06:39Z configuration_loaded=3628,3627,16769,... / no 'Starting trajectory' before exposure start(s) 2022-02-20T05:07:11Z, 2022-02-20T05:14:51Z / last 'Starting trajectory' 2022-02-20T04:01:46Z followed 2022-02-20T03:57:28Z configuration_loaded=3625,36183,21152,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 3625 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59636-robots-not-moved-a3755-b3756
+    observatory: apo
+    mjd: 59636
+    exposures: "62-63"
+    action: not_science
+    recorded_config: 3756
+    actual_config: 3755
+    reason: >-
+      Robots not moved. Configuration 3756 (B, recorded in the header) was loaded 1.1 min before
+      exposure 62 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3755 (A, the configuration the robots were last moved
+      to). 121 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 62 MATCHES_A; 63 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2022-02-26T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-26T11:44:53Z configuration_loaded=3756,10858,18559,... / no 'Starting trajectory' before exposure start(s) 2022-02-26T11:45:58Z, 2022-02-26T11:53:38Z / last 'Starting trajectory' 2022-02-26T11:24:16Z followed 2022-02-26T11:18:49Z configuration_loaded=3755,10857,18559,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 3755 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59636-robots-not-moved-a3755-b3757
+    observatory: apo
+    mjd: 59636
+    exposures: "65"
+    action: not_science
+    recorded_config: 3757
+    actual_config: 3755
+    reason: >-
+      Robots not moved. Configuration 3757 (B, recorded in the header) was loaded 3.3 min before
+      exposure 65 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3755 (A, the configuration the robots were last moved
+      to). 230 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 65
+      NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2022-02-26T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-26T12:01:33Z configuration_loaded=3757,9196,18009,... / no 'Starting trajectory' before exposure start(s) 2022-02-26T12:04:51Z / last 'Starting trajectory' 2022-02-26T11:24:16Z followed 2022-02-26T11:18:49Z configuration_loaded=3755,10857,18559,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 3755 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59636-robots-not-moved-a3755-b3758
+    observatory: apo
+    mjd: 59636
+    exposures: "66-67"
+    action: not_science
+    recorded_config: 3758
+    actual_config: 3755
+    reason: >-
+      Robots not moved. Configuration 3758 (B, recorded in the header) was loaded 0.7 min before
+      exposure 66 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3755 (A, the configuration the robots were last moved
+      to). 121 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 66 MATCHES_A; 67 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2022-02-26T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-26T12:05:58Z configuration_loaded=3758,10858,18559,... / no 'Starting trajectory' before exposure start(s) 2022-02-26T12:06:42Z, 2022-02-26T12:14:23Z / last 'Starting trajectory' 2022-02-26T11:24:16Z followed 2022-02-26T11:18:49Z configuration_loaded=3755,10857,18559,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 3755 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59637-robots-not-moved-a3787-b3788
+    observatory: apo
+    mjd: 59637
+    exposures: "43-44"
+    action: not_science
+    recorded_config: 3788
+    actual_config: 3787
+    reason: >-
+      Robots not moved. Configuration 3788 (B, recorded in the header) was loaded 0.5 min before
+      exposure 43 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3787 (A, the configuration the robots were last moved
+      to). 1 APOGEE fibers have a different target in A and B. Where the data check is undetermined or
+      was not run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level
+      data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 43 NOT_TESTED (0.4.0
+      class NOLIGHT); 44 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2022-02-27T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-27T10:14:50Z configuration_loaded=3788,21639,20867,... / no 'Starting trajectory' before exposure start(s) 2022-02-27T10:15:19Z, 2022-02-27T10:23:00Z / last 'Starting trajectory' 2022-02-27T09:50:58Z followed 2022-02-27T09:46:22Z configuration_loaded=3787,21638,20867,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 3787 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59637-robots-not-moved-a3787-b3789
+    observatory: apo
+    mjd: 59637
+    exposures: "45-46"
+    action: not_science
+    recorded_config: 3789
+    actual_config: 3787
+    reason: >-
+      Robots not moved. Configuration 3789 (B, recorded in the header) was loaded 0.6 min before
+      exposure 45 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3787 (A, the configuration the robots were last moved
+      to). 1 APOGEE fibers have a different target in A and B. Where the data check is undetermined or
+      was not run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level
+      data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 45 NOT_TESTED (0.4.0
+      class NOLIGHT); 46 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2022-02-27T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-27T10:35:20Z configuration_loaded=3789,21640,20867,... / no 'Starting trajectory' before exposure start(s) 2022-02-27T10:35:53Z, 2022-02-27T10:43:33Z / last 'Starting trajectory' 2022-02-27T09:50:58Z followed 2022-02-27T09:46:22Z configuration_loaded=3787,21638,20867,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 3787 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59637-robots-not-moved-a3787-b3790
+    observatory: apo
+    mjd: 59637
+    exposures: "47-48"
+    action: not_science
+    recorded_config: 3790
+    actual_config: 3787
+    reason: >-
+      Robots not moved. Configuration 3790 (B, recorded in the header) was loaded 0.5 min before
+      exposure 47 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3787 (A, the configuration the robots were last moved
+      to). 1 APOGEE fibers have a different target in A and B. Where the data check is undetermined or
+      was not run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level
+      data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 47 NOT_TESTED (0.4.0
+      class NOLIGHT); 48 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2022-02-27T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-27T10:53:41Z configuration_loaded=3790,21641,20867,... / no 'Starting trajectory' before exposure start(s) 2022-02-27T10:54:10Z, 2022-02-27T11:01:51Z / last 'Starting trajectory' 2022-02-27T09:50:58Z followed 2022-02-27T09:46:22Z configuration_loaded=3787,21638,20867,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 3787 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59637-robots-not-moved-a3792-b3794
+    observatory: apo
+    mjd: 59637
+    exposures: "53-54"
+    action: not_science
+    recorded_config: 3794
+    actual_config: 3792
+    reason: >-
+      Robots not moved. Configuration 3794 (B, recorded in the header) was loaded 0.7 min before
+      exposure 53 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 3792 (A, the configuration the robots were last moved
+      to). 3 APOGEE fibers have a different target in A and B. Where the data check is undetermined or
+      was not run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level
+      data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 53 NOT_TESTED (0.4.0
+      class NOLIGHT); 54 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2022-02-27T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-02-27T12:02:52Z configuration_loaded=3794,21637,20867,... / no 'Starting trajectory' before exposure start(s) 2022-02-27T12:03:36Z, 2022-02-27T12:11:17Z / last 'Starting trajectory' 2022-02-27T11:21:26Z followed 2022-02-27T11:16:04Z configuration_loaded=3792,21643,20867,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 3792 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59719-robots-not-moved-a5461-b5462
+    observatory: apo
+    mjd: 59719
+    exposures: "2"
+    action: not_science
+    recorded_config: 5462
+    actual_config: 5461
+    reason: >-
+      Robots not moved. Configuration 5462 (B, recorded in the header) was loaded 11.6 min before
+      exposure 2 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 5461 (A, the configuration the robots were last moved
+      to). 178 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 2 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 2 NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2022-05-19T07:12:00.log.gz (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-05-19T17:27:31Z configuration_loaded=5462,42965,101164,... / no 'Starting trajectory' before exposure start(s) 2022-05-19T17:39:04Z / last 'Starting trajectory' 2022-05-19T10:16:32Z followed 2022-05-19T10:05:54Z configuration_loaded=5461,111265,21478,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 5461 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59838-robots-not-moved-a6776-b6777
+    observatory: apo
+    mjd: 59838
+    exposures: "42-43"
+    action: not_science
+    recorded_config: 6777
+    actual_config: 6776
+    reason: >-
+      Robots not moved. Configuration 6777 (B, recorded in the header) was loaded 1.6 min before
+      exposure 42 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 6776 (A, the configuration the robots were last moved
+      to). 227 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 42 MATCHES_A; 43 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2022-09-16T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-09-16T08:24:50Z configuration_loaded=6777,119194,101744,... / no 'Starting trajectory' before exposure start(s) 2022-09-16T08:26:23Z, 2022-09-16T08:34:04Z / last 'Starting trajectory' 2022-09-16T08:02:05Z followed 2022-09-16T07:59:29Z configuration_loaded=6776,119193,101744,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 6776 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59866-robots-not-moved-a7019-b7020
+    observatory: apo
+    mjd: 59866
+    exposures: "44-45"
+    action: not_science
+    recorded_config: 7020
+    actual_config: 7019
+    reason: >-
+      Robots not moved. Configuration 7020 (B, recorded in the header) was loaded 4.1 min before
+      exposure 44 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 7019 (A, the configuration the robots were last moved
+      to). 134 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 44 MATCHES_A; 45 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2022-10-13T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-10-14T07:02:45Z configuration_loaded=7020,119030,101731,... / no 'Starting trajectory' before exposure start(s) 2022-10-14T07:06:49Z, 2022-10-14T07:14:30Z / last 'Starting trajectory' 2022-10-14T06:42:41Z followed 2022-10-14T06:36:55Z configuration_loaded=7019,119029,101731,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 7019 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59874-robots-not-moved-a7092-b7093
+    observatory: apo
+    mjd: 59874
+    exposures: "29-32"
+    action: not_science
+    recorded_config: 7093
+    actual_config: 7092
+    reason: >-
+      Robots not moved. Configuration 7093 (B, recorded in the header) was loaded 0.9 min before
+      exposure 29 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 7092 (A, the configuration the robots were last moved
+      to). 7 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 29 MATCHES_A (few discriminating fibers
+      (n_D=5)); 30 MATCHES_A (few discriminating fibers (n_D=5)); 31 MATCHES_A (few discriminating
+      fibers (n_D=5)); 32 MATCHES_A (few discriminating fibers (n_D=5)).
+    source:
+      file: "tron jaeger actor log 2022-10-21T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-10-22T04:24:30Z configuration_loaded=7093,130479,104657,... / no 'Starting trajectory' before exposure start(s) 2022-10-22T04:25:27Z, 2022-10-22T04:33:40Z, 2022-10-22T04:41:49Z, 2022-10-22T04:49:35Z / last 'Starting trajectory' 2022-10-22T04:02:38Z followed 2022-10-22T03:58:57Z configuration_loaded=7092,130478,104657,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 4 MATCHES_A. Candidate for a later use_config 7092 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59914-robots-not-moved-a7761-b7763
+    observatory: apo
+    mjd: 59914
+    exposures: "67"
+    action: not_science
+    recorded_config: 7763
+    actual_config: 7761
+    reason: >-
+      Robots not moved. Configuration 7763 (B, recorded in the header) was loaded 0.2 min before
+      exposure 67 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 7761 (A, the configuration the robots were last moved
+      to). 104 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 67 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2022-12-01T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-12-01T09:19:59Z configuration_loaded=7763,120595,101946,... / no 'Starting trajectory' before exposure start(s) 2022-12-01T09:20:09Z / last 'Starting trajectory' 2022-12-01T09:00:48Z followed 2022-12-01T08:58:16Z configuration_loaded=7761,120594,101946,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A. Candidate for a later use_config 7761 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59928-robots-not-moved-a7898-b7899
+    observatory: apo
+    mjd: 59928
+    exposures: "18-19"
+    action: not_science
+    recorded_config: 7899
+    actual_config: 7898
+    reason: >-
+      Robots not moved. Configuration 7899 (B, recorded in the header) was loaded 1.1 min before
+      exposure 18 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 7898 (A, the configuration the robots were last moved
+      to). 118 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 18 MATCHES_A; 19 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2022-12-14T22:19:56.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2022-12-15T02:30:07Z configuration_loaded=7899,130834,104666,... / no 'Starting trajectory' before exposure start(s) 2022-12-15T02:31:10Z, 2022-12-15T02:38:56Z / last 'Starting trajectory' 2022-12-15T01:48:06Z followed 2022-12-15T01:36:15Z configuration_loaded=7898,130833,104666,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 7898 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-59982-robots-not-moved-a8718-b8719
+    observatory: apo
+    mjd: 59982
+    exposures: "3-4"
+    action: not_science
+    recorded_config: 8719
+    actual_config: 8718
+    reason: >-
+      Robots not moved. Configuration 8719 (B, recorded in the header) was loaded 50.5 min before
+      exposure 3 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 8718 (A, the configuration the robots were last moved
+      to). 294 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 3, 4 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 3 NOT_TESTED (not in the 0.4.0 release); 4
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2023-02-06T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2023-02-06T17:10:56Z configuration_loaded=8719,126059,103688,... / no 'Starting trajectory' before exposure start(s) 2023-02-06T18:01:27Z, 2023-02-06T18:01:54Z / last 'Starting trajectory' 2023-02-06T13:06:59Z followed 2023-02-06T12:37:22Z configuration_loaded=8718,116524,101131,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 8718 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60114-robots-not-moved-a10358-b10359
+    observatory: apo
+    mjd: 60114
+    exposures: "53-54"
+    action: not_science
+    recorded_config: 10359
+    actual_config: 10358
+    reason: >-
+      Robots not moved. Configuration 10359 (B, recorded in the header) was loaded 0.4 min before
+      exposure 53 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10358 (A, the configuration the robots were last moved
+      to). 286 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 53
+      UNKNOWN (Spearman rho_A 0.37 vs rho_B -0.01, too weak to call; 4-read frame; in the hal log the
+      expose command came about 15 s before the load); 54 NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2023-06-19T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2023-06-19T09:17:35Z configuration_loaded=10359,114241,100470,... / no 'Starting trajectory' before exposure start(s) 2023-06-19T09:17:57Z, 2023-06-19T09:18:45Z / last 'Starting trajectory' 2023-06-19T08:57:23Z followed 2023-06-19T08:54:15Z configuration_loaded=10358,128822,104523,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED, 1 UNKNOWN. Candidate for a later use_config 10358 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60232-robots-not-moved-a11051-b11052
+    observatory: apo
+    mjd: 60232
+    exposures: "33-34"
+    action: not_science
+    recorded_config: 11052
+    actual_config: 11051
+    reason: >-
+      Robots not moved. Configuration 11052 (B, recorded in the header) was loaded 2.6 min before
+      exposure 33 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 11051 (A, the configuration the robots were last moved
+      to). 118 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 33 MATCHES_A; 34 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2023-10-14T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2023-10-15T05:14:03Z configuration_loaded=11052,398353,104651,... / no 'Starting trajectory' before exposure start(s) 2023-10-15T05:16:40Z, 2023-10-15T05:24:21Z / last 'Starting trajectory' 2023-10-15T04:56:27Z followed 2023-10-15T04:53:58Z configuration_loaded=11051,397623,104614,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 11051 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60261-robots-not-moved-a11577-b11578
+    observatory: apo
+    mjd: 60261
+    exposures: "19-20"
+    action: not_science
+    recorded_config: 11578
+    actual_config: 11577
+    reason: >-
+      Robots not moved. Configuration 11578 (B, recorded in the header) was loaded 3.4 min before
+      exposure 19 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 11577 (A, the configuration the robots were last moved
+      to). 11 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 19 MATCHES_A (few discriminating fibers
+      (n_D=9)); 20 MATCHES_A (few discriminating fibers (n_D=9)).
+    source:
+      file: "tron jaeger actor log 2023-11-12T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2023-11-13T04:28:06Z configuration_loaded=11578,398893,104666,... / no 'Starting trajectory' before exposure start(s) 2023-11-13T04:31:30Z, 2023-11-13T04:39:15Z / last 'Starting trajectory' 2023-11-13T04:10:25Z followed 2023-11-13T04:07:46Z configuration_loaded=11577,398892,104666,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 11577 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60285-robots-not-moved-a11896-b11897
+    observatory: apo
+    mjd: 60285
+    exposures: "43-44"
+    action: not_science
+    recorded_config: 11897
+    actual_config: 11896
+    reason: >-
+      Robots not moved. Configuration 11897 (B, recorded in the header) was loaded 4.1 min before
+      exposure 43 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 11896 (A, the configuration the robots were last moved
+      to). 125 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 43 MATCHES_A; 44 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2023-12-07T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2023-12-07T08:20:26Z configuration_loaded=11897,462868,103949,... / no 'Starting trajectory' before exposure start(s) 2023-12-07T08:24:31Z, 2023-12-07T08:32:17Z / last 'Starting trajectory' 2023-12-07T07:59:13Z followed 2023-12-07T07:56:56Z configuration_loaded=11896,462867,103949,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 11896 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60326-robots-not-moved-a12519-b12520
+    observatory: apo
+    mjd: 60326
+    exposures: "57"
+    action: not_science
+    recorded_config: 12520
+    actual_config: 12519
+    reason: >-
+      Robots not moved. Configuration 12520 (B, recorded in the header) was loaded 1.2 min before
+      exposure 57 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 12519 (A, the configuration the robots were last moved
+      to). 94 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 57 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2024-01-17T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-01-17T09:39:31Z configuration_loaded=12520,463966,104382,... / no 'Starting trajectory' before exposure start(s) 2024-01-17T09:40:46Z / last 'Starting trajectory' 2024-01-17T09:20:42Z followed 2024-01-17T09:18:23Z configuration_loaded=12519,463965,104382,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A. Candidate for a later use_config 12519 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60327-robots-not-moved-a12539-b12540
+    observatory: apo
+    mjd: 60327
+    exposures: "36"
+    action: not_science
+    recorded_config: 12540
+    actual_config: 12539
+    reason: >-
+      Robots not moved. Configuration 12540 (B, recorded in the header) was loaded 0.1 min before
+      exposure 36 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 12539 (A, the configuration the robots were last moved
+      to). 236 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 36 (+22 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 36 NOT_TESTED (0.4.0 class
+      NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-01-17T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-01-18T04:46:06Z configuration_loaded=12540,462060,103638,... / no 'Starting trajectory' before exposure start(s) 2024-01-18T04:46:10Z / last 'Starting trajectory' 2024-01-18T04:19:56Z followed 2024-01-18T04:17:34Z configuration_loaded=12539,462081,103648,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 12539 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60328-robots-not-moved-a12584-b12585
+    observatory: apo
+    mjd: 60328
+    exposures: "78"
+    action: not_science
+    recorded_config: 12585
+    actual_config: 12584
+    reason: >-
+      Robots not moved. Configuration 12585 (B, recorded in the header) was loaded 0.0 min before
+      exposure 78 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 12584 (A, the configuration the robots were last moved
+      to). 85 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 78 (+37 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 78 NOT_TESTED (0.4.0 class
+      NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-01-19T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-01-19T12:29:25Z configuration_loaded=12585,460898,103258,... / no 'Starting trajectory' before exposure start(s) 2024-01-19T12:29:26Z / last 'Starting trajectory' 2024-01-19T12:03:11Z followed 2024-01-19T12:00:24Z configuration_loaded=12584,460897,103258,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 12584 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60374-robots-not-moved-a13188-b13189
+    observatory: apo
+    mjd: 60374
+    exposures: "29-32"
+    action: not_science
+    recorded_config: 13189
+    actual_config: 13188
+    reason: >-
+      Robots not moved. Configuration 13189 (B, recorded in the header) was loaded 0.4 min before
+      exposure 29 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 13188 (A, the configuration the robots were last moved
+      to). 53 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 29
+      NOT_TESTED (not in the 0.4.0 release); 30 NOT_TESTED (not in the 0.4.0 release); 31 NOT_TESTED
+      (not in the 0.4.0 release); 32 NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2024-03-04T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-03-05T04:35:53Z configuration_loaded=13189,457589,102037,... / no 'Starting trajectory' before exposure start(s) 2024-03-05T04:36:18Z, 2024-03-05T04:44:00Z, 2024-03-05T04:54:25Z, 2024-03-05T05:02:10Z / last 'Starting trajectory' 2024-03-05T04:15:34Z followed 2024-03-05T04:13:09Z configuration_loaded=13188,457588,102037,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 4 NOT_TESTED. Candidate for a later use_config 13188 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60433-robots-not-moved-a14077-b14078
+    observatory: apo
+    mjd: 60433
+    exposures: "40-41"
+    action: not_science
+    recorded_config: 14078
+    actual_config: 14077
+    reason: >-
+      Robots not moved. Configuration 14078 (B, recorded in the header) was loaded 0.4 min before
+      exposure 40 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14077 (A, the configuration the robots were last moved
+      to). 192 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 40
+      NOT_TESTED (0.4.0 class NOLIGHT); 41 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-05-02T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-03T06:33:01Z configuration_loaded=14078,465094,104557,... / no 'Starting trajectory' before exposure start(s) 2024-05-03T06:33:24Z, 2024-05-03T06:41:10Z / last 'Starting trajectory' 2024-05-03T06:11:10Z followed 2024-05-03T06:08:50Z configuration_loaded=14077,465617,104636,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 14077 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60450-robots-not-moved-a14358-b14359
+    observatory: apo
+    mjd: 60450
+    exposures: "22-23"
+    action: not_science
+    recorded_config: 14359
+    actual_config: 14358
+    reason: >-
+      Robots not moved. Configuration 14359 (B, recorded in the header) was loaded 2.3 min before
+      exposure 22 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14358 (A, the configuration the robots were last moved
+      to). 81 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 22 MATCHES_A; 23 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2024-05-19T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-20T04:11:13Z configuration_loaded=14359,594569,101187,... / no 'Starting trajectory' before exposure start(s) 2024-05-20T04:13:31Z, 2024-05-20T04:19:52Z / last 'Starting trajectory' 2024-05-20T03:56:48Z followed 2024-05-20T03:51:18Z configuration_loaded=14358,594568,101187,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 14358 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60457-robots-not-moved-a14506-b14510
+    observatory: apo
+    mjd: 60457
+    exposures: "1"
+    action: not_science
+    recorded_config: 14510
+    actual_config: 14506
+    reason: >-
+      Robots not moved. Configuration 14510 (B, recorded in the header) was loaded 3.8 min before
+      exposure 1 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14506 (A, the configuration the robots were last moved
+      to). 296 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 1 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 1 NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2024-05-26T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-26T16:43:54Z configuration_loaded=14510,403282,112359,... / no 'Starting trajectory' before exposure start(s) 2024-05-26T16:47:40Z / last 'Starting trajectory' 2024-05-26T11:19:09Z followed 2024-05-26T11:00:29Z configuration_loaded=14506,591830,100551,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 14506 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60457-robots-not-moved-a14506-b14512
+    observatory: apo
+    mjd: 60457
+    exposures: "2-3"
+    action: not_science
+    recorded_config: 14512
+    actual_config: 14506
+    reason: >-
+      Robots not moved. Configuration 14512 (B, recorded in the header) was loaded 0.3 min before
+      exposure 2 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14506 (A, the configuration the robots were last moved
+      to). 296 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 2, 3 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 2 NOT_TESTED (not in the 0.4.0 release); 3
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2024-05-26T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-26T17:04:01Z configuration_loaded=14512,403283,112359,... / no 'Starting trajectory' before exposure start(s) 2024-05-26T17:04:21Z, 2024-05-26T17:07:04Z / last 'Starting trajectory' 2024-05-26T11:19:09Z followed 2024-05-26T11:00:29Z configuration_loaded=14506,591830,100551,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 14506 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60457-robots-not-moved-a14506-b14513
+    observatory: apo
+    mjd: 60457
+    exposures: "4-5"
+    action: not_science
+    recorded_config: 14513
+    actual_config: 14506
+    reason: >-
+      Robots not moved. Configuration 14513 (B, recorded in the header) was loaded 0.3 min before
+      exposure 4 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14506 (A, the configuration the robots were last moved
+      to). 296 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 4, 5 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 4 NOT_TESTED (not in the 0.4.0 release); 5
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2024-05-26T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-26T17:13:45Z configuration_loaded=14513,403284,112359,... / no 'Starting trajectory' before exposure start(s) 2024-05-26T17:14:04Z, 2024-05-26T17:16:48Z / last 'Starting trajectory' 2024-05-26T11:19:09Z followed 2024-05-26T11:00:29Z configuration_loaded=14506,591830,100551,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 14506 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60457-robots-not-moved-a14506-b14514
+    observatory: apo
+    mjd: 60457
+    exposures: "6-7"
+    action: not_science
+    recorded_config: 14514
+    actual_config: 14506
+    reason: >-
+      Robots not moved. Configuration 14514 (B, recorded in the header) was loaded 0.3 min before
+      exposure 6 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14506 (A, the configuration the robots were last moved
+      to). 296 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 6, 7 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 6 NOT_TESTED (not in the 0.4.0 release); 7
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2024-05-26T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-26T17:24:24Z configuration_loaded=14514,403285,112359,... / no 'Starting trajectory' before exposure start(s) 2024-05-26T17:24:43Z, 2024-05-26T17:27:26Z / last 'Starting trajectory' 2024-05-26T11:19:09Z followed 2024-05-26T11:00:29Z configuration_loaded=14506,591830,100551,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 14506 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60457-robots-not-moved-a14506-b14515
+    observatory: apo
+    mjd: 60457
+    exposures: "8-9"
+    action: not_science
+    recorded_config: 14515
+    actual_config: 14506
+    reason: >-
+      Robots not moved. Configuration 14515 (B, recorded in the header) was loaded 0.3 min before
+      exposure 8 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 14506 (A, the configuration the robots were last moved
+      to). 296 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 8, 9 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 8 NOT_TESTED (not in the 0.4.0 release); 9
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2024-05-26T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-05-26T17:31:31Z configuration_loaded=14515,403286,112359,... / no 'Starting trajectory' before exposure start(s) 2024-05-26T17:31:49Z, 2024-05-26T17:34:33Z / last 'Starting trajectory' 2024-05-26T11:19:09Z followed 2024-05-26T11:00:29Z configuration_loaded=14506,591830,100551,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 14506 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60583-robots-not-moved-a16120-b16121
+    observatory: apo
+    mjd: 60583
+    exposures: "58"
+    action: not_science
+    recorded_config: 16121
+    actual_config: 16120
+    reason: >-
+      Robots not moved. Configuration 16121 (B, recorded in the header) was loaded 2.9 min before
+      exposure 58 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 16120 (A, the configuration the robots were last moved
+      to). 76 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 58
+      NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-09-30T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-09-30T08:58:06Z configuration_loaded=16121,625531,104607,... / no 'Starting trajectory' before exposure start(s) 2024-09-30T09:01:02Z / last 'Starting trajectory' 2024-09-30T08:41:12Z followed 2024-09-30T08:38:48Z configuration_loaded=16120,625530,104607,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 16120 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60629-robots-not-moved-a17175-b17176
+    observatory: apo
+    mjd: 60629
+    exposures: "26"
+    action: not_science
+    recorded_config: 17176
+    actual_config: 17175
+    reason: >-
+      Robots not moved. Configuration 17176 (B, recorded in the header) was loaded 0.4 min before
+      exposure 26 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 17175 (A, the configuration the robots were last moved
+      to). 243 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 26 (+51 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 26 NOT_TESTED (0.4.0 class
+      NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-11-14T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2024-11-15T02:23:24Z configuration_loaded=17176,675710,104435,... / no 'Starting trajectory' before exposure start(s) 2024-11-15T02:23:48Z / last 'Starting trajectory' 2024-11-15T02:08:00Z followed 2024-11-15T02:05:18Z configuration_loaded=17175,672683,102404,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 17175 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60704-robots-not-moved-a18936-b18937
+    observatory: apo
+    mjd: 60704
+    exposures: "60"
+    action: not_science
+    recorded_config: 18937
+    actual_config: 18936
+    reason: >-
+      Robots not moved. Configuration 18937 (B, recorded in the header) was loaded 0.3 min before
+      exposure 60 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 18936 (A, the configuration the robots were last moved
+      to). 62 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 60
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2025-01-29T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2025-01-29T09:12:45Z configuration_loaded=18937,671499,101515,... / no 'Starting trajectory' before exposure start(s) 2025-01-29T09:13:06Z / last 'Starting trajectory' 2025-01-29T08:47:19Z followed 2025-01-29T08:45:05Z configuration_loaded=18936,671498,101515,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 18936 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60844-robots-not-moved-a21217-b21218
+    observatory: apo
+    mjd: 60844
+    exposures: "26-30"
+    action: not_science
+    recorded_config: 21218
+    actual_config: 21217
+    reason: >-
+      Robots not moved. Configuration 21218 (B, recorded in the header) was loaded 1.4 min before
+      exposure 26 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 21217 (A, the configuration the robots were last moved
+      to). 296 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 26
+      MATCHES_A; 27 UNKNOWN (Spearman statistics point to A (rho_A 0.74 vs rho_B 0.08) but bright sky
+      defeats the lit/unlit check); 28 NOT_TESTED (0.4.0 class NOLIGHT); 29 NOT_TESTED (0.4.0 class
+      NOLIGHT); 30 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2025-06-17T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2025-06-18T06:19:18Z configuration_loaded=21218,711970,100490,... / no 'Starting trajectory' before exposure start(s) 2025-06-18T06:20:43Z, 2025-06-18T06:26:11Z, 2025-06-18T06:32:37Z, 2025-06-18T06:34:41Z, 2025-06-18T06:42:22Z / last 'Starting trajectory' 2025-06-18T06:03:20Z followed 2025-06-18T06:00:20Z configuration_loaded=21217,711911,100485,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A, 3 NOT_TESTED, 1 UNKNOWN. Candidate for a later use_config 21217 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60845-robots-not-moved-a21231-b21232
+    observatory: apo
+    mjd: 60845
+    exposures: "14"
+    action: not_science
+    recorded_config: 21232
+    actual_config: 21231
+    reason: >-
+      Robots not moved. Configuration 21232 (B, recorded in the header) was loaded 1.4 min before
+      exposure 14 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 21231 (A, the configuration the robots were last moved
+      to). 146 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 14 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 14 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2025-06-18T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2025-06-19T02:36:38Z configuration_loaded=21232,713131,101423,... / no 'Starting trajectory' before exposure start(s) 2025-06-19T02:38:00Z / last 'Starting trajectory' 2025-06-19T01:12:18Z followed 2025-06-19T00:58:15Z configuration_loaded=21231,-999,-999,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 21231 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-60974-robots-not-moved-a21905-b21906
+    observatory: apo
+    mjd: 60974
+    exposures: "70-71"
+    action: not_science
+    recorded_config: 21906
+    actual_config: 21905
+    reason: >-
+      Robots not moved. Configuration 21906 (B, recorded in the header) was loaded 0.8 min before
+      exposure 70 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 21905 (A, the configuration the robots were last moved
+      to). 88 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 70
+      NOT_TESTED (not in the 0.4.0 release); 71 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2025-10-26T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2025-10-26T11:50:43Z configuration_loaded=21906,756250,104400,... / no 'Starting trajectory' before exposure start(s) 2025-10-26T11:51:29Z, 2025-10-26T11:52:14Z / last 'Starting trajectory' 2025-10-26T11:19:27Z followed 2025-10-26T11:17:10Z configuration_loaded=21905,754156,101983,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 21905 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-61056-robots-not-moved-a24138-b24139
+    observatory: apo
+    mjd: 61056
+    exposures: "80-81"
+    action: not_science
+    recorded_config: 24139
+    actual_config: 24138
+    reason: >-
+      Robots not moved. Configuration 24139 (B, recorded in the header) was loaded 0.4 min before
+      exposure 80 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 24138 (A, the configuration the robots were last moved
+      to). 71 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 80
+      NOT_TESTED (0.4.0 class NOLIGHT); 81 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2026-01-16T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2026-01-16T12:06:00Z configuration_loaded=24139,753612,101445,... / no 'Starting trajectory' before exposure start(s) 2026-01-16T12:06:23Z, 2026-01-16T12:14:09Z / last 'Starting trajectory' 2026-01-16T11:47:12Z followed 2026-01-16T11:44:42Z configuration_loaded=24138,753411,101213,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 24138 (whole exposure) only where the data check says MATCHES_A."
+  - id: apo-61087-robots-not-moved-a24785-b24786
+    observatory: apo
+    mjd: 61087
+    exposures: "78"
+    action: not_science
+    recorded_config: 24786
+    actual_config: 24785
+    reason: >-
+      Robots not moved. Configuration 24786 (B, recorded in the header) was loaded 1.6 min before
+      exposure 78 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 24785 (A, the configuration the robots were last moved
+      to). 7 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 78 MATCHES_A (few discriminating fibers
+      (n_D=6)).
+    source:
+      file: "tron jaeger actor log 2026-02-16T07:12:00.log (apo; Utah sdss51 sdsswork/data/logs/apo/tron/jaeger)"
+      quote: "2026-02-16T11:57:08Z configuration_loaded=24786,756824,104631,... / no 'Starting trajectory' before exposure start(s) 2026-02-16T11:58:44Z / last 'Starting trajectory' 2026-02-16T11:23:18Z followed 2026-02-16T11:20:55Z configuration_loaded=24785,756823,104631,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A. Candidate for a later use_config 24785 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60013-robots-not-moved-a10001661-b10001662
+    observatory: lco
+    mjd: 60013
+    exposures: "14"
+    action: not_science
+    recorded_config: 10001662
+    actual_config: 10001661
+    reason: >-
+      Robots not moved. Configuration 10001662 (B, recorded in the header) was loaded 10.7 min before
+      exposure 14 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10001661 (A, the configuration the robots were last moved
+      to). 124 APOGEE fibers have a different target in A and B. The robots were also folded at the
+      start of exposure(s) 14 (jaeger folded=T after the last trajectory), so those fibers were at
+      neither configuration. Where the data check is undetermined or was not run, the exposure is
+      listed on the log evidence alone: it is bad either way. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 14 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2023-03-09T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2023-03-10T00:49:18Z configuration_loaded=10001662,185426,25285,... / no 'Starting trajectory' before exposure start(s) 2023-03-10T01:00:02Z / last 'Starting trajectory' 2023-03-10T00:48:28Z followed 2023-03-09T23:35:46Z configuration_loaded=10001661,185425,25285,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 10001661 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60330-robots-not-moved-a10005904-b10005905
+    observatory: lco
+    mjd: 60330
+    exposures: "44-45"
+    action: not_science
+    recorded_config: 10005905
+    actual_config: 10005904
+    reason: >-
+      Robots not moved. Configuration 10005905 (B, recorded in the header) was loaded 0.9 min before
+      exposure 44 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10005904 (A, the configuration the robots were last moved
+      to). 56 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 44 MATCHES_A; 45 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2024-01-20T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2024-01-21T08:34:34Z configuration_loaded=10005905,484620,107808,... / no 'Starting trajectory' before exposure start(s) 2024-01-21T08:35:30Z, 2024-01-21T08:43:05Z / last 'Starting trajectory' 2024-01-21T08:10:57Z followed 2024-01-21T08:06:33Z configuration_loaded=10005904,484619,107808,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 10005904 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60374-robots-not-moved-a10006592-b10006593
+    observatory: lco
+    mjd: 60374
+    exposures: "16-17"
+    action: not_science
+    recorded_config: 10006593
+    actual_config: 10006592
+    reason: >-
+      Robots not moved. Configuration 10006593 (B, recorded in the header) was loaded 0.8 min before
+      exposure 16 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10006592 (A, the configuration the robots were last moved
+      to). 45 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 16 MATCHES_A; 17 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2024-03-04T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2024-03-05T01:44:05Z configuration_loaded=10006593,499379,110287,... / no 'Starting trajectory' before exposure start(s) 2024-03-05T01:44:53Z, 2024-03-05T01:52:28Z / last 'Starting trajectory' 2024-03-05T01:15:59Z followed 2024-03-05T01:11:12Z configuration_loaded=10006592,499378,110287,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 10006592 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60399-robots-not-moved-a10007075-b10007076
+    observatory: lco
+    mjd: 60399
+    exposures: "40-41"
+    action: not_science
+    recorded_config: 10007076
+    actual_config: 10007075
+    reason: >-
+      Robots not moved. Configuration 10007076 (B, recorded in the header) was loaded 0.2 min before
+      exposure 40 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10007075 (A, the configuration the robots were last moved
+      to). 298 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 40
+      MATCHES_A; 41 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-03-29T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2024-03-30T06:25:20Z configuration_loaded=10007076,511297,104676,... / no 'Starting trajectory' before exposure start(s) 2024-03-30T06:25:35Z, 2024-03-30T06:33:10Z / last 'Starting trajectory' 2024-03-30T06:00:01Z followed 2024-03-30T05:57:28Z configuration_loaded=10007075,547854,112356,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A, 1 NOT_TESTED. Candidate for a later use_config 10007075 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60481-robots-not-moved-a10008119-b10008120
+    observatory: lco
+    mjd: 60481
+    exposures: "49"
+    action: not_science
+    recorded_config: 10008120
+    actual_config: 10008119
+    reason: >-
+      Robots not moved. Configuration 10008120 (B, recorded in the header) was loaded 0.3 min before
+      exposure 49 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10008119 (A, the configuration the robots were last moved
+      to). 297 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 49 (+53 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 49 UNKNOWN (Spearman
+      statistics point to A (rho_A 0.85 vs rho_B 0.03) but bright sky defeats the lit/unlit check).
+    source:
+      file: "tron jaeger actor log 2024-06-19T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2024-06-20T06:24:39Z configuration_loaded=10008120,656584,110050,... / no 'Starting trajectory' before exposure start(s) 2024-06-20T06:24:56Z / last 'Starting trajectory' 2024-06-20T06:01:58Z followed 2024-06-20T05:59:09Z configuration_loaded=10008119,656314,110042,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 UNKNOWN. Candidate for a later use_config 10008119 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60486-robots-not-moved-a10008148-b10008149
+    observatory: lco
+    mjd: 60486
+    exposures: "19"
+    action: not_science
+    recorded_config: 10008149
+    actual_config: 10008148
+    reason: >-
+      Robots not moved. Configuration 10008149 (B, recorded in the header) was loaded 0.3 min before
+      exposure 19 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10008148 (A, the configuration the robots were last moved
+      to). 33 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 19 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2024-06-24T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2024-06-25T00:56:11Z configuration_loaded=10008149,631324,104981,... / no 'Starting trajectory' before exposure start(s) 2024-06-25T00:56:30Z / last 'Starting trajectory' 2024-06-25T00:35:35Z followed 2024-06-25T00:32:13Z configuration_loaded=10008148,631323,104981,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A. Candidate for a later use_config 10008148 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60520-robots-not-moved-a10008809-b10008810
+    observatory: lco
+    mjd: 60520
+    exposures: "49"
+    action: not_science
+    recorded_config: 10008810
+    actual_config: 10008809
+    reason: >-
+      Robots not moved. Configuration 10008810 (B, recorded in the header) was loaded 0.3 min before
+      exposure 49 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10008809 (A, the configuration the robots were last moved
+      to). 109 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 49 (+36 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 49 NOT_TESTED (0.4.0 class
+      NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2024-07-28T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2024-07-29T05:38:51Z configuration_loaded=10008810,637289,106084,... / no 'Starting trajectory' before exposure start(s) 2024-07-29T05:39:07Z / last 'Starting trajectory' 2024-07-29T05:14:33Z followed 2024-07-29T05:09:22Z configuration_loaded=10008809,637288,106084,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 10008809 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60792-robots-not-moved-a10014081-b10014082
+    observatory: lco
+    mjd: 60792
+    exposures: "27"
+    action: not_science
+    recorded_config: 10014082
+    actual_config: 10014081
+    reason: >-
+      Robots not moved. Configuration 10014082 (B, recorded in the header) was loaded 4.6 min before
+      exposure 27 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10014081 (A, the configuration the robots were last moved
+      to). 39 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 27 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2025-04-26T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-04-27T02:13:04Z configuration_loaded=10014082,725201,107170,... / no 'Starting trajectory' before exposure start(s) 2025-04-27T02:17:42Z / last 'Starting trajectory' 2025-04-27T01:53:14Z followed 2025-04-27T01:50:45Z configuration_loaded=10014081,725200,107170,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A. Candidate for a later use_config 10014081 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60794-robots-not-moved-a10014135-b10014136
+    observatory: lco
+    mjd: 60794
+    exposures: "25-26"
+    action: not_science
+    recorded_config: 10014136
+    actual_config: 10014135
+    reason: >-
+      Robots not moved. Configuration 10014136 (B, recorded in the header) was loaded 4.4 min before
+      exposure 25 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10014135 (A, the configuration the robots were last moved
+      to). 89 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 25
+      NOT_TESTED (0.4.0 class NOLIGHT); 26 NOT_TESTED (0.4.0 class NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2025-04-28T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-04-29T01:20:12Z configuration_loaded=10014136,725771,107736,... / no 'Starting trajectory' before exposure start(s) 2025-04-29T01:24:38Z, 2025-04-29T01:32:08Z / last 'Starting trajectory' 2025-04-29T01:00:46Z followed 2025-04-29T00:57:57Z configuration_loaded=10014135,725353,107242,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 NOT_TESTED. Candidate for a later use_config 10014135 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60897-robots-not-moved-a10016222-b10016223
+    observatory: lco
+    mjd: 60897
+    exposures: "39"
+    action: not_science
+    recorded_config: 10016223
+    actual_config: 10016222
+    reason: >-
+      Robots not moved. Configuration 10016223 (B, recorded in the header) was loaded 0.2 min before
+      exposure 39 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10016222 (A, the configuration the robots were last moved
+      to). 135 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 39 (+29 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 39 NOT_TESTED (0.4.0 class
+      NOLIGHT).
+    source:
+      file: "tron jaeger actor log 2025-08-09T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-08-10T07:35:35Z configuration_loaded=10016223,729932,110148,... / no 'Starting trajectory' before exposure start(s) 2025-08-10T07:35:45Z / last 'Starting trajectory' 2025-08-10T07:14:57Z followed 2025-08-10T07:11:58Z configuration_loaded=10016222,723159,105622,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 10016222 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60934-robots-not-moved-a10016736-b10016737
+    observatory: lco
+    mjd: 60934
+    exposures: "45"
+    action: not_science
+    recorded_config: 10016737
+    actual_config: 10016736
+    reason: >-
+      Robots not moved. Configuration 10016737 (B, recorded in the header) was loaded 0.3 min before
+      exposure 45 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10016736 (A, the configuration the robots were last moved
+      to). 21 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 45
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2025-09-15T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-09-16T05:40:07Z configuration_loaded=10016737,745940,110872,... / no 'Starting trajectory' before exposure start(s) 2025-09-16T05:40:25Z / last 'Starting trajectory' 2025-09-16T05:22:06Z followed 2025-09-16T05:19:41Z configuration_loaded=10016736,745939,110872,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 10016736 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60941-robots-not-moved-a10016856-b10016857
+    observatory: lco
+    mjd: 60941
+    exposures: "15"
+    action: not_science
+    recorded_config: 10016857
+    actual_config: 10016856
+    reason: >-
+      Robots not moved. Configuration 10016857 (B, recorded in the header) was loaded 0.2 min before
+      exposure 15 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10016856 (A, the configuration the robots were last moved
+      to). 298 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 15
+      UNKNOWN (Spearman statistics point to A (rho_A 0.88 vs rho_B 0.02) but bright sky defeats the
+      lit/unlit check).
+    source:
+      file: "tron jaeger actor log 2025-09-22T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-09-23T00:17:08Z configuration_loaded=10016857,737334,106379,... / no 'Starting trajectory' before exposure start(s) 2025-09-23T00:17:18Z / last 'Starting trajectory' 2025-09-22T23:58:00Z followed 2025-09-22T23:54:16Z configuration_loaded=10016856,743263,109910,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 UNKNOWN. Candidate for a later use_config 10016856 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60941-robots-not-moved-a10016861-b10016862
+    observatory: lco
+    mjd: 60941
+    exposures: "38-39"
+    action: not_science
+    recorded_config: 10016862
+    actual_config: 10016861
+    reason: >-
+      Robots not moved. Configuration 10016862 (B, recorded in the header) was loaded 1.7 min before
+      exposure 38 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10016861 (A, the configuration the robots were last moved
+      to). 30 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 38 MATCHES_A; 39 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2025-09-22T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-09-23T04:29:11Z configuration_loaded=10016862,742247,108603,... / no 'Starting trajectory' before exposure start(s) 2025-09-23T04:30:51Z, 2025-09-23T04:38:21Z / last 'Starting trajectory' 2025-09-23T04:08:08Z followed 2025-09-23T04:05:41Z configuration_loaded=10016861,742246,108603,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 10016861 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-60983-robots-not-moved-a10017715-b10017716
+    observatory: lco
+    mjd: 60983
+    exposures: "21"
+    action: not_science
+    recorded_config: 10017716
+    actual_config: 10017715
+    reason: >-
+      Robots not moved. Configuration 10017716 (B, recorded in the header) was loaded 0.3 min before
+      exposure 21 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10017715 (A, the configuration the robots were last moved
+      to). 132 APOGEE fibers have a different target in A and B. Where the data check is undetermined
+      or was not run, the exposure is listed on the log evidence alone: it is bad either way.
+      Fiber-level data check (2026-11-19; fiber light vs. catalog H of the A and B targets): 21
+      NOT_TESTED (not in the 0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2025-11-03T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2025-11-04T02:59:14Z configuration_loaded=10017716,734866,104858,... / no 'Starting trajectory' before exposure start(s) 2025-11-04T02:59:32Z / last 'Starting trajectory' 2025-11-04T02:37:43Z followed 2025-11-04T02:35:22Z configuration_loaded=10017715,734902,104922,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 10017715 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-61114-robots-not-moved-a10020342-b10020343
+    observatory: lco
+    mjd: 61114
+    exposures: "19"
+    action: not_science
+    recorded_config: 10020343
+    actual_config: 10020342
+    reason: >-
+      Robots not moved. Configuration 10020343 (B, recorded in the header) was loaded 0.9 min before
+      exposure 19 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10020342 (A, the configuration the robots were last moved
+      to). 70 APOGEE fibers have a different target in A and B. A robot trajectory started during
+      exposure(s) 19 (+22 s), so their light is mixed. Where the data check is undetermined or was not
+      run, the exposure is listed on the log evidence alone: it is bad either way. Fiber-level data
+      check (2026-11-19; fiber light vs. catalog H of the A and B targets): 19 NOT_TESTED (not in the
+      0.4.0 release).
+    source:
+      file: "tron jaeger actor log 2026-03-14T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2026-03-15T01:38:43Z configuration_loaded=10020343,746480,111363,... / no 'Starting trajectory' before exposure start(s) 2026-03-15T01:39:39Z / last 'Starting trajectory' 2026-03-15T00:49:01Z followed 2026-03-15T00:46:02Z configuration_loaded=10020342,746479,111363,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 NOT_TESTED. Candidate for a later use_config 10020342 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-61158-robots-not-moved-a10021403-b10021404
+    observatory: lco
+    mjd: 61158
+    exposures: "49"
+    action: not_science
+    recorded_config: 10021404
+    actual_config: 10021403
+    reason: >-
+      Robots not moved. Configuration 10021404 (B, recorded in the header) was loaded 0.3 min before
+      exposure 49 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10021403 (A, the configuration the robots were last moved
+      to). 298 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 49 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2026-04-27T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2026-04-28T09:02:06Z configuration_loaded=10021404,741098,108306,... / no 'Starting trajectory' before exposure start(s) 2026-04-28T09:02:24Z / last 'Starting trajectory' 2026-04-28T08:43:06Z followed 2026-04-28T08:40:36Z configuration_loaded=10021403,740745,108293,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 1 MATCHES_A. Candidate for a later use_config 10021403 (whole exposure) only where the data check says MATCHES_A."
+  - id: lco-61210-robots-not-moved-a10022430-b10022431
+    observatory: lco
+    mjd: 61210
+    exposures: "47-48"
+    action: not_science
+    recorded_config: 10022431
+    actual_config: 10022430
+    reason: >-
+      Robots not moved. Configuration 10022431 (B, recorded in the header) was loaded 0.9 min before
+      exposure 47 started, but no robot trajectory ran between that load and the exposure start(s), so
+      the fibers were still at configuration 10022430 (A, the configuration the robots were last moved
+      to). 44 APOGEE fibers have a different target in A and B. Fiber-level data check (2026-11-19;
+      fiber light vs. catalog H of the A and B targets): 47 MATCHES_A; 48 MATCHES_A.
+    source:
+      file: "tron jaeger actor log 2026-06-18T12:00:00.log (lco; Utah sdss51 sdsswork/data/logs/lco/tron/jaeger)"
+      quote: "2026-06-19T06:46:06Z configuration_loaded=10022431,737202,106111,... / no 'Starting trajectory' before exposure start(s) 2026-06-19T06:47:01Z, 2026-06-19T06:54:36Z / last 'Starting trajectory' 2026-06-19T06:12:59Z followed 2026-06-19T06:09:07Z configuration_loaded=10022430,737201,106111,..."
+    notes: "not_science for 0.4.1 (see the file header). Data check: 2 MATCHES_A. Candidate for a later use_config 10022430 (whole exposure) only where the data check says MATCHES_A."
+  # END robots-not-moved
