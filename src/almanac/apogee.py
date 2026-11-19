@@ -87,8 +87,9 @@ def _add_apogee_id_rows(lookup: Dict[str, int], rows) -> Dict[str, int]:
 
     Selection rule (see `best_ranked_lookup`): the best (lowest)
     `sdss_id_flat.rank` wins; only among rows with that same best rank does
-    the larger sdss_id win (AKS 2026-11-18: the larger-sdss_id tie-break
-    applies "only if there are multiple rank 1 entries"). All queries keep
+    the smaller sdss_id win (AKS 2026-11-18: the sdss_id tie-break applies
+    "only if there are multiple rank 1 entries"; AKS 2026-11-19: take the
+    lowest sdss_id, the convention of other SDSS pipelines). All queries keep
     only rank-1 rows, so in practice the tie-break only separates two or more
     rank-1 sdss_id for one key: `sdss_id_flat.rank` orders the sdss_ids of
     one catalogid, and one star can have two catalogids (e.g. one per allStar
@@ -123,8 +124,9 @@ def best_ranked_lookup(rows) -> Dict[Any, int]:
     {identifier: sdss_id} from (identifier, sdss_id, rank) rows.
 
     For each identifier: the row with the best (lowest) `sdss_id_flat.rank`
-    wins; if several rows share that best rank, the LARGEST sdss_id among
-    them wins. A larger sdss_id never beats a better-ranked one. The result
+    wins; if several rows share that best rank, the SMALLEST sdss_id among
+    them wins (the convention of other SDSS pipelines). A smaller sdss_id
+    never beats a better-ranked one. The result
     is independent of row order. A missing rank (None) counts as worse than
     any rank.
     """
@@ -135,7 +137,7 @@ def best_ranked_lookup(rows) -> Dict[Any, int]:
         if (
             current is None
             or r < current[0]
-            or (r == current[0] and sdss_id > current[1])
+            or (r == current[0] and sdss_id < current[1])
         ):
             best[identifier] = (r, sdss_id)
     return {identifier: sdss_id for identifier, (_, sdss_id) in best.items()}
@@ -634,7 +636,7 @@ def get_apogee_id_lookup(
     apogee_id that can produce the key (the identifier, or the identifier
     with "2M", "J" or "AP" prepended) is fetched in the same query, and the
     rows are folded with the same rules (bad short entries such as "AP" are
-    skipped; best rank first, and among rows of equal best rank the largest
+    skipped; best rank first, and among rows of equal best rank the smallest
     sdss_id, as in the full lookup).
 
     The returned dictionary is the process-wide memo; callers must not
@@ -681,7 +683,7 @@ def get_apogee_id_lookup(
 # Each query keeps only `sdss_id_flat.rank = 1` rows (as before 2026-11-18)
 # and also returns the rank; `best_ranked_lookup` then picks, per
 # identifier, the best rank and, only among rows of that equal best rank,
-# the largest sdss_id. With the rank-1 filter, the tie-break only acts when
+# the smallest sdss_id. With the rank-1 filter, the tie-break only acts when
 # an identifier reaches two or more rank-1 sdss_id (e.g. a Gaia DR2 source
 # or 2MASS designation cross-matched to two catalogids).
 # ---------------------------------------------------------------------------
