@@ -34,7 +34,14 @@ names an observatory, an MJD, a set of exposures and one action:
     The exposure is not usable as a science exposure: ``flagged_bad`` is set.
 
 Every entry carries a free-text ``reason`` and a ``source`` (the file and a
-verbatim quote). Overrides are applied in one place,
+verbatim quote). An FPS entry may also record ``recorded_config`` (the
+configuration in the header) and ``actual_config`` (the configuration the
+fiber positioners were really at). They are optional and must be given
+together; when present, the header configuration of every listed exposure
+must equal ``recorded_config`` (checked when the entry is applied), and for
+``use_config`` ``actual_config`` must equal ``config_id``. They let a
+``not_science`` entry be switched to ``use_config`` later without
+re-deriving the configurations. Overrides are applied in one place,
 :func:`almanac.apogee.get_almanac_data`, and are never silent: affected
 exposures carry the entry ids in ``override_ids`` and what was done in
 ``override_actions``; affected fibers carry ``override_id``. They can be
@@ -71,7 +78,7 @@ _ACTION_KEYS = {
     "mark_exposure": (set(), set()),
     "not_science": (set(), set()),
 }
-_OPTIONAL = {"notes"}
+_OPTIONAL = {"notes", "recorded_config", "actual_config"}
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.\-]*$")
 _CONFIG_ACTIONS = ("use_config", "use_previous_config")
 
@@ -94,6 +101,8 @@ class Override:
     other_fibers: str = "keep"
     config_id: int = -1
     notes: str = ""
+    recorded_config: int = -1
+    actual_config: int = -1
 
 
 def parse_exposures(value, entry_id="?") -> Tuple[int, ...]:
@@ -195,6 +204,22 @@ def _validate_entry(raw) -> Override:
     notes = raw.get("notes", "")
     if not isinstance(notes, str):
         raise OverrideError(f"{entry_id}: notes must be text")
+
+    configs = [k for k in ("recorded_config", "actual_config") if k in raw]
+    if configs:
+        if len(configs) != 2:
+            raise OverrideError(f"{entry_id}: recorded_config and actual_config must be given together")
+        if action == "retarget_fibers":
+            raise OverrideError(f"{entry_id}: recorded_config/actual_config are for FPS configuration entries")
+        for k in configs:
+            v = raw[k]
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                raise OverrideError(f"{entry_id}: {k} must be a positive int, got {v!r}")
+        if raw["recorded_config"] == raw["actual_config"]:
+            raise OverrideError(f"{entry_id}: recorded_config and actual_config must differ")
+        if action == "use_config" and raw["actual_config"] != kwds["config_id"]:
+            raise OverrideError(f"{entry_id}: actual_config must equal config_id for use_config")
+        kwds.update(recorded_config=raw["recorded_config"], actual_config=raw["actual_config"])
 
     return Override(
         id=entry_id,
@@ -343,6 +368,13 @@ def apply_exposure_overrides(exposures, entries: List[Override]) -> None:
     """
     for entry in entries:
         targets = _exposures_by_number(exposures, entry)
+        if entry.recorded_config > 0:
+            for e in targets:
+                if not e.fps or e.config_id != entry.recorded_config:
+                    raise OverrideError(
+                        f"{entry.id}: exposure {e.exposure} has configuration {e.config_id} "
+                        f"(fps={e.fps}), not recorded_config {entry.recorded_config}"
+                    )
         if entry.action == "mark_exposure":
             for e in targets:
                 _note(e, entry, "mark_exposure")

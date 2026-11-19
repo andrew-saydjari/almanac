@@ -260,3 +260,189 @@ class TestApply:
             assert [x.decode() for x in fp["exposures/fiber_map_key"][:]] == ["5099", "5099.override.apo-55755-test"]
             assert fp["fibers/category"][0].decode() == RETARGETED_CATEGORY
             assert fp["fibers/override_target"][0].decode() == "VESTA"
+
+
+class TestConfigFields:
+    """Optional recorded_config / actual_config (FPS configuration entries)."""
+
+    @pytest.mark.parametrize(
+        "change, message",
+        [
+            (dict(recorded_config=5), "together"),
+            (dict(actual_config=5), "together"),
+            (dict(recorded_config=0, actual_config=5), "recorded_config must be a positive int"),
+            (dict(recorded_config=5, actual_config="4"), "actual_config must be a positive int"),
+            (dict(recorded_config=True, actual_config=4), "recorded_config must be a positive int"),
+            (dict(recorded_config=5, actual_config=5), "must differ"),
+            (dict(action="use_config", config_id=3, recorded_config=5, actual_config=4), "equal config_id"),
+            (dict(action="retarget_fibers", fibers={2: "V"}, other_fibers="keep", recorded_config=5, actual_config=4),
+             "FPS configuration entries"),
+        ],
+    )
+    def test_invalid(self, change, message):
+        e = entry(mjd=60285)
+        e.update(change)
+        with pytest.raises(OverrideError, match=message):
+            parse_overrides(doc(e))
+
+    def test_valid_and_checked_on_apply(self):
+        exposures = [Exposure(observatory="apo", mjd=60285, exposure=i, imagetyp="Object", configid=c)
+                     for i, c in ((1, 11896), (2, 11897))]
+        ok = parse_overrides(doc(entry(mjd=60285, exposures="2", action="not_science",
+                                       recorded_config=11897, actual_config=11896)))
+        assert (ok[0].recorded_config, ok[0].actual_config) == (11897, 11896)
+        apply_exposure_overrides(exposures, ok)
+        assert exposures[1].flagged_bad and not exposures[0].flagged_bad
+
+        # The entry names a header configuration the exposure does not have.
+        bad = parse_overrides(doc(entry(mjd=60285, exposures="1", action="not_science",
+                                        recorded_config=11897, actual_config=11896)))
+        with pytest.raises(OverrideError, match="not recorded_config"):
+            apply_exposure_overrides(exposures, bad)
+
+        # use_config with matching actual_config is accepted and applied.
+        exposures = [Exposure(observatory="apo", mjd=60285, exposure=1, imagetyp="Object", configid=11897)]
+        uc = parse_overrides(doc(entry(mjd=60285, exposures="1", action="use_config", config_id=11896,
+                                       recorded_config=11897, actual_config=11896)))
+        apply_exposure_overrides(exposures, uc)
+        assert exposures[0].config_id == 11896
+
+
+# ---------------------------------------------------------------------------
+# The generated "robots not moved" entries (scripts/robots_not_moved/).
+# ---------------------------------------------------------------------------
+
+import importlib.util
+from pathlib import Path
+
+_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "robots_not_moved" / "robots_not_moved.py"
+
+
+def _generator():
+    spec = importlib.util.spec_from_file_location("robots_not_moved", _SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _robots_entries():
+    return [e for e in load_overrides() if "-robots-not-moved-" in e.id]
+
+
+def _mock_night(observatory, mjd, entries, extra=2):
+    """
+    FPS object exposures 1..N+extra of one night: listed exposures carry their
+    entry's recorded (header) configuration, all others the actual one.
+    """
+    header = {}
+    for e in entries:
+        for x in e.exposures:
+            header[x] = e.recorded_config
+    fallback = entries[0].actual_config
+    n = max(header) + extra
+    return [
+        Exposure(observatory=observatory, mjd=mjd, exposure=i, imagetyp="Object", configid=header.get(i, fallback))
+        for i in range(1, n + 1)
+    ]
+
+
+class TestRobotsNotMoved:
+    def test_shipped_entries(self):
+        entries = _robots_entries()
+        exposures = {(e.observatory, e.mjd, x) for e in entries for x in e.exposures}
+        # 94 exposures: 71 APO on 29 nights, 23 LCO on 16 nights (see the README).
+        assert len(exposures) == 94
+        assert sum(1 for k in exposures if k[0] == "apo") == 71
+        assert len({k[:2] for k in exposures if k[0] == "apo"}) == 29
+        assert len({k[:2] for k in exposures if k[0] == "lco"}) == 16
+        for e in entries:
+            assert e.action == "not_science"
+            assert e.recorded_config > 0 and e.actual_config > 0 and e.recorded_config != e.actual_config
+            assert e.id == f"{e.observatory}-{e.mjd}-robots-not-moved-a{e.actual_config}-b{e.recorded_config}"
+            assert str(e.recorded_config) in e.reason and str(e.actual_config) in e.reason
+            assert "data check" in e.reason
+            assert "configuration_loaded=" in e.source_quote and "Starting trajectory" in e.source_quote
+            # Excluded: LCO before MJD 60000 (the signature is false there).
+            assert not (e.observatory == "lco" and e.mjd < 60000)
+        # The LCO 59860 exposures whose light follows the recorded configuration are not listed.
+        assert not any(k[:2] == ("lco", 59860) for k in exposures)
+        # A few named cases.
+        for k in [("apo", 60285, 43), ("apo", 60285, 44), ("apo", 60450, 22), ("apo", 60450, 23),
+                  ("lco", 61210, 47), ("lco", 60481, 49), ("apo", 59914, 67)]:
+            assert k in exposures, k
+
+    def test_generated_block_is_current(self):
+        gen = _generator()
+        listed, excluded = gen.select(gen.read_candidates())
+        block = gen.render_block(gen.group_entries(listed))
+        text = (Path(__file__).resolve().parents[1] / "src" / "almanac" / "etc" / "exposure_overrides.yaml").read_text()
+        assert gen.current_block(text) == block, "regenerate with robots_not_moved.py overrides --write-yaml"
+        assert len(listed) == 94 and len(excluded) == 3
+
+    def test_header_note(self):
+        text = (Path(__file__).resolve().parents[1] / "src" / "almanac" / "etc" / "exposure_overrides.yaml").read_text()
+        head = text.split("version: 1")[0]
+        assert "marked bad (not_science) for 0.4.1" in head
+        assert "use_config <A>" in head and "WHOLE exposure" in head
+
+    def test_every_listed_exposure_exists_and_is_flagged(self):
+        """Apply every shipped entry to a mock night: no entry may fail, all listed are flagged."""
+        entries = _robots_entries()
+        nights = sorted({(e.observatory, e.mjd) for e in entries})
+        for observatory, mjd in nights:
+            night = overrides_for(observatory, mjd)
+            assert night
+            exposures = _mock_night(observatory, mjd, night)
+            apply_exposure_overrides(exposures, night)
+            listed = {x for e in night for x in e.exposures}
+            for x in exposures:
+                if x.exposure in listed:
+                    assert x.flagged_bad and "not_science" in x.override_actions, (observatory, mjd, x.exposure)
+                    assert x.config_id in {e.recorded_config for e in night}  # header kept
+                else:
+                    assert not x.flagged_bad and x.override_ids == "", (observatory, mjd, x.exposure)
+
+    def _night_60285(self):
+        # APO 60285: 42 is the previous configuration (A), 43-44 recorded B but
+        # the robots were at A, 45 is after the real move to B.
+        return [
+            Exposure(observatory="apo", mjd=60285, exposure=i, imagetyp="Object", configid=c)
+            for i, c in ((42, 11896), (43, 11897), (44, 11897), (45, 11897))
+        ]
+
+    def test_get_almanac_data_and_no_overrides(self, monkeypatch):
+        import almanac.apogee as apogee
+
+        monkeypatch.setattr(apogee, "get_exposures_and_missing", lambda o, m: (self._night_60285(), []))
+        *_, exposures, _, _ = apogee.get_almanac_data("apo", 60285)
+        by = {e.exposure: e for e in exposures}
+        assert by[43].flagged_bad and by[44].flagged_bad
+        assert by[43].override_ids == "apo-60285-robots-not-moved-a11896-b11897"
+        assert not by[42].flagged_bad and not by[45].flagged_bad and by[45].override_ids == ""
+        assert by[43].config_id == 11897  # not_science does not change the configuration
+
+        *_, exposures, _, _ = apogee.get_almanac_data("apo", 60285, overrides=False)
+        assert not any(e.flagged_bad for e in exposures)
+        assert all(e.override_ids == "" for e in exposures)
+
+    def test_cli_no_overrides(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        import almanac.apogee as apogee
+        from almanac.cli import main
+
+        monkeypatch.setattr(apogee, "get_exposures_and_missing", lambda o, m: (self._night_60285(), []))
+        results = {}
+        for flag in ([], ["--no-overrides"]):
+            output = str(tmp_path / f"out{len(flag)}.h5")
+            r = CliRunner().invoke(main, ["--mjd", "60285", "--apo", "--output", output, *flag],
+                                   catch_exceptions=False)
+            assert r.exit_code == 0, r.output
+            with h5.File(output, "r") as fp:
+                g = fp["raw/apo/60285"]
+                results[bool(flag)] = (
+                    list(g["exposures/exposure"][:]),
+                    [bool(x) for x in g["exposures/flagged_bad"][:]],
+                    g.attrs["exposure_overrides"],
+                )
+        assert results[False] == ([42, 43, 44, 45], [False, True, True, False], "enabled")
+        assert results[True] == ([42, 43, 44, 45], [False, False, False, False], "disabled")
