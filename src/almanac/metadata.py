@@ -27,6 +27,14 @@ cartons the installed ``sdss_semaphore`` knows, listed in the
 
 With ``since``, rows already present in a previously decorated file (or a
 targets file) are copied rather than queried.
+
+With ``extended`` (``almanac add metadata --extended``), the value-added
+columns of ``ExtendedSource`` are queried too and written after the default
+columns (adapted from upstream sdss/almanac a922dee). Without it the output
+is exactly the default ``Source`` columns. The checkpoint records which mode
+it was made in and refuses to resume in the other; with ``since``, rows of a
+file that lacks the extended columns are queried again rather than copied with
+default values.
 """
 
 from __future__ import annotations
@@ -148,10 +156,31 @@ def _ids_digest(ids: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(ids, dtype=np.int64).tobytes()).hexdigest()
 
 
-def _source_fields():
-    from almanac.data_models.source import Source
+def _source_fields(extended: bool = False):
+    from almanac.data_models.source import Source, ExtendedSource
 
-    return Source, {**Source.model_fields, **Source.model_computed_fields}
+    model = ExtendedSource if extended else Source
+    return model, {**model.model_fields, **model.model_computed_fields}
+
+
+def extended_field_names() -> List[str]:
+    """Names of the columns ``--extended`` adds (in column order)."""
+    from almanac.data_models.source import EXTENDED_COLUMN_GROUPS
+
+    return [name for names in EXTENDED_COLUMN_GROUPS.values() for name in names]
+
+
+def check_extended_requirements() -> None:
+    """Fail early, with an actionable message, if ``--extended`` cannot run."""
+    try:
+        import healpy  # noqa: F401
+    except ImportError as e:
+        raise MetadataBuildError(
+            "--extended needs the 'healpy' package (a declared dependency of almanac), "
+            "which is not installed in this environment. Re-sync the environment from "
+            "the almanac checkout, e.g. `uv sync --frozen` (project venv) or "
+            "`uv pip install -p <env>/bin/python -e <almanac checkout>`."
+        ) from e
 
 
 # --------------------------------------------------------------------------- #
@@ -159,7 +188,7 @@ def _source_fields():
 # --------------------------------------------------------------------------- #
 
 
-def results_to_columns(results: Dict[int, dict]):
+def results_to_columns(results: Dict[int, dict], extended: bool = False):
     """
     Turn the per-sdss_id query results of one batch into column arrays.
 
@@ -173,7 +202,7 @@ def results_to_columns(results: Dict[int, dict]):
     """
     from almanac.io import write_models_to_hdf5_group
 
-    Source, fields = _source_fields()
+    Source, fields = _source_fields(extended)
     sdss_id_list = sorted(results.keys())
     unknown = set()
     if not sdss_id_list:
@@ -321,6 +350,12 @@ def _default_query_batch(sdss_ids, suffix=""):
     return _query_catalog(list(sdss_ids), suffix=suffix)
 
 
+def _extended_query_batch(sdss_ids, suffix=""):
+    from almanac.catalog import _query_catalog
+
+    return _query_catalog(list(sdss_ids), suffix=suffix, extended=True)
+
+
 def _worker_init():
     """Open the worker's database connection before its first batch, so that
     batch timings measure the queries only."""
@@ -379,7 +414,11 @@ def _run_batches(
 
             executor = cf.ProcessPoolExecutor(
                 max_workers=n_workers,
-                initializer=_worker_init if query_batch is _default_query_batch else None,
+                initializer=(
+                    _worker_init
+                    if query_batch in (_default_query_batch, _extended_query_batch)
+                    else None
+                ),
             )
             try:
                 futures = {}
@@ -580,6 +619,7 @@ def build_metadata(
     retry_max_delay: float = 1800.0,
     query_batch: Optional[Callable] = None,
     ids: Optional[Iterable[int]] = None,
+    extended: bool = False,
 ) -> dict:
     """
     Build ``/meta`` for the sdss_id in ``input_path``. See the module docstring.
@@ -588,9 +628,12 @@ def build_metadata(
         (default: the catalog query). Tests pass a fake.
     :param ids: use these sdss_id instead of collecting them from the input
         (the input is then still the provenance record).
+    :param extended: also build the value-added columns (``--extended``).
     :returns: a summary dict (also stored as attributes on ``/meta``).
     """
-    query_batch = query_batch or _default_query_batch
+    if extended:
+        check_extended_requirements()
+    query_batch = query_batch or (_extended_query_batch if extended else _default_query_batch)
     input_path = os.path.abspath(input_path)
     if output_path:
         output_path = os.path.abspath(output_path)
@@ -618,7 +661,7 @@ def build_metadata(
     )
 
     # 2. What is already known (--since).
-    Source, fields = _source_fields()
+    Source, fields = _source_fields(extended)
     field_names = list(fields.keys())
     prev_columns, prev_descriptions, prev_not_found = {}, {}, np.zeros(0, dtype=np.int64)
     copied_columns = {}
@@ -627,6 +670,18 @@ def build_metadata(
     if since:
         prev_columns, prev_descriptions, prev_not_found, prev_pairs = _read_previous(since)
         prev_ids = np.asarray(prev_columns["sdss_id"], dtype=np.int64)
+        if extended:
+            missing_ext = [n for n in extended_field_names() if n not in prev_columns]
+            if missing_ext:
+                # Copying these rows would give them default values in the
+                # extended columns; query them again instead.
+                _log(
+                    f"--extended: --since file lacks {len(missing_ext)} extended column(s) "
+                    f"(e.g. {missing_ext[0]}); its {prev_ids.size:,} rows are queried again, not copied"
+                )
+                prev_ids = np.zeros(0, dtype=np.int64)
+                prev_columns = {k: v[:0] for k, v in prev_columns.items()}
+                prev_pairs = None if prev_pairs is None else (prev_pairs[0][:0], prev_pairs[1][:0])
         mask = np.isin(prev_ids, all_ids)
         copied_columns = {k: v[mask] for k, v in prev_columns.items()}
         if prev_pairs is not None:
@@ -664,6 +719,13 @@ def build_metadata(
         shutil.rmtree(ckpt.path)
     if ckpt.exists():
         manifest = ckpt.read_manifest()
+        if bool(manifest.get("extended", False)) != bool(extended):
+            raise MetadataBuildError(
+                f"checkpoint {ckpt.path} was made "
+                f"{'with' if manifest.get('extended', False) else 'without'} --extended; "
+                f"this run is {'with' if extended else 'without'} it. Use --fresh to discard it, "
+                "or --checkpoint-dir to use another directory."
+            )
         if manifest.get("ids_digest") != digest or manifest.get("batch_size") != batch_size:
             raise MetadataBuildError(
                 f"checkpoint {ckpt.path} was made for a different id set or batch size "
@@ -683,6 +745,7 @@ def build_metadata(
                 n_ids_to_query=int(ids_to_query.size),
                 ids_digest=digest,
                 batch_size=batch_size,
+                **({"extended": True} if extended else {}),
                 created_utc=_utcnow(),
                 query_start_utc=None,
             ),
@@ -710,7 +773,7 @@ def build_metadata(
     total_ids = int(ids_to_query.size)
 
     def on_done(index, ids_b, result, t0, t1):
-        columns, descriptions, unknown, pairs = results_to_columns(result)
+        columns, descriptions, unknown, pairs = results_to_columns(result, extended)
         ckpt.write_batch(index, ids_b, columns, descriptions, unknown, t0, t1, pairs)
         state["done_ids"] += len(ids_b)
         state["done_batches"] += 1
@@ -828,6 +891,12 @@ def build_metadata(
         columns=list(columns.keys()),
         sdss_id_set_sha256=_ids_digest(all_ids),
     )
+    if extended:
+        # Only in --extended mode, so that the default /meta keeps its attributes.
+        from almanac.data_models.source import EXTENDED_COLUMN_GROUPS
+
+        attrs["extended"] = True
+        attrs["extended_column_groups"] = list(EXTENDED_COLUMN_GROUPS.keys())
     extras = {
         NOT_FOUND_GROUP: {"sdss_id": not_found},
         CARTON_GROUP: {"sdss_id": carton_ids, "carton_pk": carton_pks},

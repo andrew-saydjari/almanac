@@ -156,7 +156,14 @@ cp /path/to/file.h5 /path/to/file_meta.h5
 almanac add metadata /path/to/file_meta.h5 --query-workers 4    # decorate the COPY
 almanac add metadata /path/to/file.h5 --output targets.h5       # input read-only
 almanac add metadata new.h5 --output targets_new.h5 --since targets.h5  # only new sdss_id
+almanac add metadata /path/to/file.h5 --output targets_ext.h5 --extended   # + value-added columns
 ```
+
+`--extended` (opt-in) adds the SDSS_ID position with Galactic coordinates and a HEALPix
+index, `n_associated`, unWISE and GLIMPSE photometry, Bailer-Jones et al. (2021)
+distances, Gaia DR3 synthetic photometry, Zhang, Green & Rix (2023) parameters and the
+SDSS-IV APOGEE (DR17) targeting bitmasks, after the default columns (adapted from
+upstream sdss/almanac). Without it the output is unchanged.
 
 Finished batches are checkpointed next to the output (`<output>.meta-checkpoint/`), so an
 interrupted run is resumed by re-running the same command; the final `/meta` is written in
