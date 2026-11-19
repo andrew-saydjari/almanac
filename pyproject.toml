@@ -38,6 +38,15 @@ dependencies = [
     "sdss-semaphore>=0.2.8",
     # `almanac add metadata --extended` (HEALPix index); from upstream a922dee.
     "healpy>=1.20.0",
+    # Imported directly by almanac; previously present only as transitive
+    # dependencies (of astropy, sdssdb, pydantic, pydl). Declared so that the
+    # test in tests/test_declared_dependencies.py can hold.
+    "peewee",
+    "pydantic-core",
+    "pyerfa",
+    "pyyaml",
+    "scipy",
+    "typing-extensions",
 ]
 
 [project.urls]

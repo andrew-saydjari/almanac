@@ -1,0 +1,30 @@
+name: tests
+
+# Unit tests (no database). Live-database tests are opt-in (ALMANAC_DB_TESTS=1)
+# and are skipped here. Installs from uv.lock, so the run also checks that the
+# lock is current (`--locked` fails if pyproject.toml and uv.lock disagree).
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (from uv.lock)
+        run: uv sync --locked --extra dev
+      - name: Undeclared-import check
+        run: uv run --no-sync pytest -q --no-cov tests/test_declared_dependencies.py
+      - name: Unit tests
+        run: uv run --no-sync pytest -q --no-cov
