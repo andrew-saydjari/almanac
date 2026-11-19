@@ -101,17 +101,17 @@ def test_live_join_rows_are_rank_1(apogee):
     assert rows and all(row[2] == 1 for row in rows)
 
 
-def test_rank_1_tie_takes_larger_sdss_id(apogee):
+def test_rank_1_tie_takes_smaller_sdss_id(apogee):
     # AP00451807+4047096: two rank-1 sdss_id (129046733, 129048422).
     candidates = _candidates(apogee, AMBIGUOUS)
     for fetch in (
         lambda c: apogee._query_apogee_id_rows_from_view(TABLE, c),
         apogee._query_apogee_id_rows,
     ):
-        assert apogee._add_apogee_id_rows({}, fetch(candidates))["00451807+4047096"] == 129048422
+        assert apogee._add_apogee_id_rows({}, fetch(candidates))["00451807+4047096"] == 129046733
 
 
-def test_catalogid_path_keeps_rank_1_over_larger_rank_2(apogee):
-    # catalogid 63050395066243429 has sdss_id 70149305 (rank 1) and the
-    # larger 70149306 (rank 2): rank wins, the larger sdss_id must not.
+def test_catalogid_path_keeps_rank_1_over_rank_2(apogee):
+    # catalogid 63050395066243429 has sdss_id 70149305 (rank 1) and
+    # 70149306 (rank 2): the rank-1 sdss_id is kept.
     assert apogee.catalogid_sdss_id_lookup([63050395066243429]) == {63050395066243429: 70149305}

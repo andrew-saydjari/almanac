@@ -80,7 +80,7 @@ is readable and is not empty, it is read instead of the four-table join; its
 if a source table was analyzed after that date, and identifiers the view misses are retried with the live join (a match found
 that way is logged as a warning that the table is stale). When an identifier
 has several sdss_id (several catalogids, each with a rank-1 sdss_id), the
-largest sdss_id is used, on every path.
+smallest sdss_id is used, on every path.
 Each night's HDF5 group records the source used in its
 `apogee_id_lookup_*` attributes (`apogee_id_lookup_view_kind` says whether
 the relation is a table or a materialized view; the source value stays
