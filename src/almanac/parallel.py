@@ -145,31 +145,6 @@ def resolve_query_workers(explicit: Optional[int] = None, config=None,
     return n, f"config catalog_query_max_workers={n}"
 
 
-DEPRECATED_METADATA_P = (
-    "`almanac add metadata --p` is deprecated and has no effect; "
-    "use --query-workers to set the number of database query workers "
-    "(it will be removed in a future release)."
-)
-
-
-def warn_deprecated_metadata_p(p) -> Optional[str]:
-    """Warn (``FutureWarning`` and a log WARNING) if the deprecated
-    ``add metadata --p`` was given; return the message, or ``None``."""
-    if p is None:
-        return None
-    import warnings
-
-    message = f"{DEPRECATED_METADATA_P} (got --p {p})"
-    warnings.warn(message, FutureWarning, stacklevel=2)
-    try:
-        from almanac import logger
-
-        logger.warning(message)
-    except Exception:
-        pass
-    return message
-
-
 # --------------------------------------------------------------------------- #
 # Cross-process cap on database connections (main command workers)
 # --------------------------------------------------------------------------- #

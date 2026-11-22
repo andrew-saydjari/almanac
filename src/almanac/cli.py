@@ -722,10 +722,6 @@ def _get_sdss_ids(fp, obs, mjd):
 @click.option("--apo", is_flag=True, help="Query Apache Point Observatory data")
 @click.option("--lco", is_flag=True, help="Query Las Campanas Observatory data")
 @click.option(
-    "--p", default=None, type=int, hidden=True,
-    help="Deprecated and ignored (warns): use --query-workers.",
-)
-@click.option(
     "--query-workers",
     default=None,
     type=int,
@@ -789,7 +785,6 @@ def metadata(
     date_end,
     apo,
     lco,
-    p,
     query_workers,
     output_path,
     since,
@@ -829,7 +824,6 @@ def metadata(
     )
     from almanac import logger, parallel
 
-    parallel.warn_deprecated_metadata_p(p)
     query_workers_resolved = parallel.resolve_query_workers(
         query_workers, config=config, allow_zero=True
     )

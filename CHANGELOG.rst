@@ -10,7 +10,9 @@ Change Log
   command never starts more workers than observatory/MJD pairs. ``--query-workers`` (main
   command, ``add metadata``; default ``catalog_query_max_workers`` = 4) caps how many workers
   hold a database connection at once. The resolved numbers and their source are logged.
-  ``almanac add metadata --p`` now warns that it is deprecated (use ``--query-workers``).
+  ``almanac add metadata --p`` (ignored for a long time) is removed and is now rejected as an
+  unknown option; use ``--query-workers``. Nothing in the ApogeeReduction.jl pipelines used it
+  (they call the main ``almanac`` command with ``-p 12``, which is unchanged).
 * ``almanac add metadata --extended`` (opt-in) writes 79 value-added columns after the
   default ones: SDSS_ID position (``ra``, ``dec``, ``l``, ``b``, ``healpix``),
   ``n_associated``, unWISE and GLIMPSE photometry, Bailer-Jones et al. (2021) distances,

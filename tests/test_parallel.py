@@ -4,7 +4,6 @@ import logging
 import sys
 import threading
 import types
-import warnings
 
 import pytest
 from click.testing import CliRunner
@@ -14,7 +13,6 @@ from almanac.parallel import (
     cpu_budget,
     resolve_processes,
     resolve_query_workers,
-    warn_deprecated_metadata_p,
 )
 
 
@@ -118,49 +116,41 @@ class TestResolveQueryWorkers:
         assert resolve_query_workers(0, config=cfg)[0] == 1
 
 
-class TestDeprecatedMetadataP:
-    def test_no_warning_when_not_given(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            assert warn_deprecated_metadata_p(None) is None
-
-    def test_warning_points_to_query_workers(self):
-        with pytest.warns(FutureWarning, match="--query-workers"):
-            message = warn_deprecated_metadata_p(12)
-        assert "deprecated" in message
-
-    def test_cli_warns_and_uses_query_workers(self, tmp_path, monkeypatch):
-        import almanac.metadata as md
-        from almanac.cli import main
-
-        seen = {}
-
-        def fake_build(input_path, **kwargs):
-            seen.update(kwargs)
-            return {}
-
-        monkeypatch.setattr(md, "build_metadata", fake_build)
-        with pytest.warns(FutureWarning, match="--query-workers"):
-            r = CliRunner().invoke(
-                main,
-                ["add", "metadata", str(tmp_path / "x.h5"), "--p", "12", "--query-workers", "2"],
-                catch_exceptions=False,
-            )
-        assert r.exit_code == 0
-        assert seen["query_workers"] == 2
-
-    def test_cli_without_p_does_not_warn(self, tmp_path, monkeypatch):
+class TestMetadataOptions:
+    def test_cli_uses_query_workers(self, tmp_path, monkeypatch):
         import almanac.metadata as md
         from almanac.cli import main
 
         seen = {}
         monkeypatch.setattr(md, "build_metadata", lambda input_path, **kw: seen.update(kw) or {})
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", FutureWarning)
-            r = CliRunner().invoke(main, ["add", "metadata", str(tmp_path / "x.h5")],
-                                   catch_exceptions=False)
+        r = CliRunner().invoke(
+            main, ["add", "metadata", str(tmp_path / "x.h5"), "--query-workers", "2"],
+            catch_exceptions=False,
+        )
+        assert r.exit_code == 0
+        assert seen["query_workers"] == 2
+
+    def test_cli_default_query_workers(self, tmp_path, monkeypatch):
+        import almanac.metadata as md
+        from almanac.cli import main
+
+        seen = {}
+        monkeypatch.setattr(md, "build_metadata", lambda input_path, **kw: seen.update(kw) or {})
+        r = CliRunner().invoke(main, ["add", "metadata", str(tmp_path / "x.h5")],
+                               catch_exceptions=False)
         assert r.exit_code == 0
         assert seen["query_workers"] >= 1
+
+    def test_removed_p_is_rejected(self, tmp_path, monkeypatch):
+        import almanac.metadata as md
+        from almanac.cli import main
+
+        called = []
+        monkeypatch.setattr(md, "build_metadata", lambda *a, **kw: called.append(1) or {})
+        r = CliRunner().invoke(main, ["add", "metadata", str(tmp_path / "x.h5"), "--p", "4"])
+        assert r.exit_code == 2  # click usage error
+        assert "No such option" in r.output and "--p" in r.output
+        assert not called
 
 
 class TestDbGate:
