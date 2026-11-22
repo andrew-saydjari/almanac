@@ -1,5 +1,6 @@
 #from itertools import batched
 import os
+import numpy as np
 from tqdm import tqdm
 from typing import List
 from peewee import JOIN, BigIntegerField
@@ -21,6 +22,169 @@ def merge_dicts(*dicts):
         k: next((d[k] for d in dicts if d.get(k, None) is not None), None)
         for k in keys
     }
+
+
+def merge_missing(existing: dict, new: dict) -> dict:
+    """
+    Update `existing` in place with any keys from `new` that are absent or
+    `None` in `existing`, and return it. Unlike `merge_dicts`, the union of
+    keys is kept, so value-added catalog rows can extend a source record.
+    """
+    for key, value in new.items():
+        if existing.get(key, None) is None:
+            existing[key] = value
+    return existing
+
+
+# HEALPix resolution used for the `healpix` field (RING ordering, lon/lat input).
+HEALPIX_NSIDE = 128
+
+# Vega zero-point offsets applied when converting unWISE fluxes (nMgy) to
+# magnitudes. See https://catalog.unwise.me/catalogs.html ("Flux Scale").
+UNWISE_VEGA_OFFSETS = {"w1": 4e-3, "w2": 32e-3}
+
+# SDSS-IV APOGEE targeting bitmasks that are stored as *signed* 32-bit
+# integers in catalogdb.allstar_dr17_synspec_rev1 (bit 31 set -> negative).
+SDSS4_APOGEE_INT32_FLAG_FIELDS = (
+    "sdss4_apogee_target1_flags",
+    "sdss4_apogee_target2_flags",
+    "sdss4_apogee2_target1_flags",
+    "sdss4_apogee2_target2_flags",
+    "sdss4_apogee2_target3_flags",
+    "sdss4_apogee_extra_target_flags",
+)
+
+
+def to_unsigned_int32(value):
+    """
+    Re-interpret a signed 32-bit integer bitmask as unsigned (`None` passes
+    through). Positive values are unchanged; negative values gain 2**32.
+    """
+    if value is None:
+        return None
+    return int(value) & 0xFFFFFFFF
+
+
+def unwise_flux_to_mag(flux, dflux, band: str):
+    """
+    Convert unWISE fluxes (Vega nMgy) to Vega magnitudes and errors.
+
+    :param flux:
+        Flux (or array of fluxes) in nMgy.
+    :param dflux:
+        Statistical flux uncertainty (or array) in nMgy.
+    :param band:
+        Either "w1" or "w2" (selects the Vega zero-point offset).
+
+    :returns:
+        A two-length tuple of (mag, e_mag) arrays; NaN where the flux is
+        missing or non-positive.
+    """
+    offset = UNWISE_VEGA_OFFSETS[band]
+    flux = np.array(flux, dtype=float, ndmin=1)
+    dflux = np.array(dflux, dtype=float, ndmin=1)
+    ok = np.isfinite(flux) & (flux > 0)
+    safe_flux = np.where(ok, flux, 1.0)
+    mag = np.where(ok, -2.5 * np.log10(safe_flux) + 22.5 - offset, np.nan)
+    e_mag = np.where(ok, (2.5 / np.log(10)) * dflux / safe_flux, np.nan)
+    return (mag, e_mag)
+
+
+def compute_galactic_coordinates(ra, dec):
+    """
+    Convert ICRS (ra, dec) [deg] to Galactic (l, b) [deg]. Non-finite inputs
+    give NaN outputs.
+    """
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    ra = np.array(ra, dtype=float, ndmin=1)
+    dec = np.array(dec, dtype=float, ndmin=1)
+    l = np.full(ra.shape, np.nan)
+    b = np.full(ra.shape, np.nan)
+    ok = np.isfinite(ra) & np.isfinite(dec)
+    if np.any(ok):
+        galactic = SkyCoord(ra=ra[ok] * u.deg, dec=dec[ok] * u.deg, frame="icrs").galactic
+        l[ok] = galactic.l.deg
+        b[ok] = galactic.b.deg
+    return (l, b)
+
+
+def compute_healpix(ra, dec, nside: int = HEALPIX_NSIDE):
+    """
+    Compute HEALPix pixel indices (RING ordering) for ICRS (ra, dec) [deg].
+    Non-finite inputs give -1.
+    """
+    from healpy import ang2pix
+
+    ra = np.array(ra, dtype=float, ndmin=1)
+    dec = np.array(dec, dtype=float, ndmin=1)
+    healpix = np.full(ra.shape, -1, dtype=np.int64)
+    ok = np.isfinite(ra) & np.isfinite(dec)
+    if np.any(ok):
+        healpix[ok] = ang2pix(nside, ra[ok], dec[ok], lonlat=True)
+    return healpix
+
+
+def add_derived_quantities(meta: dict) -> dict:
+    """
+    Fill in quantities derived from the queried catalog values, in place:
+
+    - `ra`/`dec` fall back to the Gaia DR3 position when the SDSS_ID position
+      is missing;
+    - `l`, `b`, and `healpix` are computed from `ra`/`dec`;
+    - unWISE magnitudes (and errors) are computed from fluxes;
+    - Zhang, Green & Rix (2023) temperatures are converted from kK to K;
+    - SDSS-IV APOGEE signed 32-bit bitmasks are re-interpreted as unsigned.
+
+    :param meta:
+        Dictionary of source dictionaries, keyed by `sdss_id`.
+    """
+    if not meta:
+        return meta
+
+    sdss_ids = list(meta.keys())
+
+    def _float(item, key):
+        value = item.get(key, None)
+        return np.nan if value is None else float(value)
+
+    for sdss_id in sdss_ids:
+        item = meta[sdss_id]
+        if item.get("ra", None) is None:
+            item["ra"] = item.get("gaia_ra", None)
+        if item.get("dec", None) is None:
+            item["dec"] = item.get("gaia_dec", None)
+
+    ra = np.array([_float(meta[s], "ra") for s in sdss_ids])
+    dec = np.array([_float(meta[s], "dec") for s in sdss_ids])
+    l, b = compute_galactic_coordinates(ra, dec)
+    healpix = compute_healpix(ra, dec)
+
+    for band in ("w1", "w2"):
+        flux = np.array([_float(meta[s], f"{band}_flux") for s in sdss_ids])
+        dflux = np.array([_float(meta[s], f"{band}_dflux") for s in sdss_ids])
+        mag, e_mag = unwise_flux_to_mag(flux, dflux, band)
+        for i, sdss_id in enumerate(sdss_ids):
+            meta[sdss_id][f"{band}_mag"] = mag[i]
+            meta[sdss_id][f"e_{band}_mag"] = e_mag[i]
+
+    for i, sdss_id in enumerate(sdss_ids):
+        item = meta[sdss_id]
+        item["l"] = l[i]
+        item["b"] = b[i]
+        item["healpix"] = int(healpix[i])
+
+        # The ZGR catalog stores temperatures in kK.
+        for key in ("zgr_teff", "zgr_e_teff"):
+            if item.get(key, None) is not None:
+                item[key] = 1000 * float(item[key])
+
+        for key in SDSS4_APOGEE_INT32_FLAG_FIELDS:
+            if item.get(key, None) is not None:
+                item[key] = to_unsigned_int32(item[key])
+
+    return meta
 
 
 def _copy_sdss_ids(database, table_name: str, sdss_ids):
@@ -137,6 +301,212 @@ def _query_catalog(sdss_ids: List[int], suffix=""):
     from almanac.retry import retry_on_database_error
 
     return retry_on_database_error(_query_catalog_once)(sdss_ids, suffix=suffix)
+
+
+def _select_sdss_id_position(Source, cdb):
+    """SDSS_ID position from `sdss_id_stacked` (one row per `sdss_id`)."""
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            cdb.SDSS_ID_stacked.ra_sdss_id.alias("ra"),
+            cdb.SDSS_ID_stacked.dec_sdss_id.alias("dec"),
+        )
+        .join(cdb.SDSS_ID_stacked, on=(Source.sdss_id == cdb.SDSS_ID_stacked.sdss_id))
+    )
+
+
+def _select_n_associated(Source, cdb):
+    """
+    Number of SDSS_IDs associated with the primary (`rank == 1`) catalogid,
+    from `sdss_id_flat`. Ordered so the highest `version_id` merges first.
+    """
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            cdb.SDSS_ID_flat.n_associated,
+        )
+        .join(cdb.SDSS_ID_flat, on=(Source.sdss_id == cdb.SDSS_ID_flat.sdss_id))
+        .where(cdb.SDSS_ID_flat.rank == 1)
+        .order_by(Source.sdss_id.asc(), cdb.SDSS_ID_flat.version_id.desc())
+    )
+
+
+def _select_unwise(Source, cdb):
+    """unWISE fluxes and flags, matched through `sdss_id_to_catalog.unwise`."""
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            cdb.unWISE.flux_w1.alias("w1_flux"),
+            cdb.unWISE.dflux_w1.alias("w1_dflux"),
+            cdb.unWISE.fracflux_w1.alias("w1_frac"),
+            cdb.unWISE.flux_w2.alias("w2_flux"),
+            cdb.unWISE.dflux_w2.alias("w2_dflux"),
+            cdb.unWISE.fracflux_w2.alias("w2_frac"),
+            cdb.unWISE.flags_unwise_w1.alias("w1uflags"),
+            cdb.unWISE.flags_unwise_w2.alias("w2uflags"),
+            cdb.unWISE.flags_info_w1.alias("w1aflags"),
+            cdb.unWISE.flags_info_w2.alias("w2aflags"),
+        )
+        .join(cdb.SDSS_ID_To_Catalog, on=(Source.sdss_id == cdb.SDSS_ID_To_Catalog.sdss_id))
+        .join(cdb.unWISE, on=(cdb.unWISE.unwise_objid == cdb.SDSS_ID_To_Catalog.unwise))
+    )
+
+
+def _select_glimpse(Source, cdb):
+    """GLIMPSE 4.5um photometry, matched through `sdss_id_to_catalog.glimpse`."""
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            cdb.GLIMPSE.mag4_5,
+            cdb.GLIMPSE.d4_5m,
+            cdb.GLIMPSE.rms_f4_5,
+            cdb.GLIMPSE.sqf_4_5,
+            cdb.GLIMPSE.mf4_5,
+            cdb.GLIMPSE.csf,
+        )
+        .join(cdb.SDSS_ID_To_Catalog, on=(Source.sdss_id == cdb.SDSS_ID_To_Catalog.sdss_id))
+        .join(cdb.GLIMPSE, on=(cdb.GLIMPSE.pk == cdb.SDSS_ID_To_Catalog.glimpse))
+    )
+
+
+def _select_bailer_jones(Source, cdb):
+    """Bailer-Jones et al. (2021) distances, matched on the Gaia DR3 source_id."""
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            cdb.BailerJonesEDR3.r_med_geo,
+            cdb.BailerJonesEDR3.r_lo_geo,
+            cdb.BailerJonesEDR3.r_hi_geo,
+            cdb.BailerJonesEDR3.r_med_photogeo,
+            cdb.BailerJonesEDR3.r_lo_photogeo,
+            cdb.BailerJonesEDR3.r_hi_photogeo,
+            cdb.BailerJonesEDR3.flag.alias("bailer_jones_flags"),
+        )
+        .join(cdb.SDSS_ID_To_Catalog, on=(Source.sdss_id == cdb.SDSS_ID_To_Catalog.sdss_id))
+        .join(cdb.BailerJonesEDR3, on=(cdb.BailerJonesEDR3.source_id == cdb.SDSS_ID_To_Catalog.gaia_dr3_source))
+    )
+
+
+def _select_gaia_synthetic_photometry(Source, cdb):
+    """Gaia DR3 synthetic photometry (GSPC), matched on the Gaia DR3 source_id."""
+    G = cdb.Gaia_dr3_synthetic_photometry_gspc
+    columns = [Source.sdss_id, G.c_star]
+    for band in ("u_jkc", "b_jkc", "v_jkc", "r_jkc", "i_jkc", "u_sdss", "g_sdss", "r_sdss", "i_sdss", "z_sdss", "y_ps1"):
+        columns.append(getattr(G, f"{band}_mag"))
+        columns.append(getattr(G, f"{band}_flag").alias(f"{band}_mag_flag"))
+    return (
+        Source
+        .select(*columns)
+        .join(cdb.SDSS_ID_To_Catalog, on=(Source.sdss_id == cdb.SDSS_ID_To_Catalog.sdss_id))
+        .join(G, on=(G.source_id == cdb.SDSS_ID_To_Catalog.gaia_dr3_source))
+    )
+
+
+def _select_zhang_stellar_parameters(Source, cdb):
+    """
+    Zhang, Green & Rix (2023) stellar parameters from Gaia XP spectra, matched
+    on the Gaia DR3 source_id. Temperatures are converted from kK to K in
+    `add_derived_quantities`.
+    """
+    Z = cdb.Gaia_Stellar_Parameters
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            Z.stellar_params_est_teff.alias("zgr_teff"),
+            Z.stellar_params_err_teff.alias("zgr_e_teff"),
+            Z.stellar_params_est_logg.alias("zgr_logg"),
+            Z.stellar_params_err_logg.alias("zgr_e_logg"),
+            Z.stellar_params_est_fe_h.alias("zgr_fe_h"),
+            Z.stellar_params_err_fe_h.alias("zgr_e_fe_h"),
+            Z.stellar_params_est_e.alias("zgr_e"),
+            Z.stellar_params_err_e.alias("zgr_e_e"),
+            Z.stellar_params_est_parallax.alias("zgr_plx"),
+            Z.stellar_params_err_parallax.alias("zgr_e_plx"),
+            Z.teff_confidence.alias("zgr_teff_confidence"),
+            Z.logg_confidence.alias("zgr_logg_confidence"),
+            Z.feh_confidence.alias("zgr_fe_h_confidence"),
+            Z.ln_prior.alias("zgr_ln_prior"),
+            Z.chi2_opt.alias("zgr_chi2"),
+            Z.quality_flags.alias("zgr_quality_flags"),
+        )
+        .join(cdb.SDSS_ID_To_Catalog, on=(Source.sdss_id == cdb.SDSS_ID_To_Catalog.sdss_id))
+        .join(Z, on=(Z.gdr3_source_id == cdb.SDSS_ID_To_Catalog.gaia_dr3_source))
+    )
+
+
+def _select_sdss4_apogee_targeting(Source, cdb):
+    """
+    SDSS-IV APOGEE (DR17 allStar) targeting bitmasks, matched through
+    `sdss_id_to_catalog.allstar_dr17_synspec_rev1` (the apstar_id).
+    """
+    Star = cdb.AllStar_DR17_synspec_rev1
+    return (
+        Source
+        .select(
+            Source.sdss_id,
+            Star.apogee_target1.alias("sdss4_apogee_target1_flags"),
+            Star.apogee_target2.alias("sdss4_apogee_target2_flags"),
+            Star.apogee2_target1.alias("sdss4_apogee2_target1_flags"),
+            Star.apogee2_target2.alias("sdss4_apogee2_target2_flags"),
+            Star.apogee2_target3.alias("sdss4_apogee2_target3_flags"),
+            Star.memberflag.alias("sdss4_apogee_member_flags"),
+            Star.extratarg.alias("sdss4_apogee_extra_target_flags"),
+        )
+        .join(cdb.SDSS_ID_To_Catalog, on=(Source.sdss_id == cdb.SDSS_ID_To_Catalog.sdss_id))
+        .join(Star, on=(Star.apstar_id == cdb.SDSS_ID_To_Catalog.allstar_dr17_synspec_rev1))
+    )
+
+
+# Value-added catalogs joined to each batch of sources. Each builder returns a
+# peewee query selecting `sdss_id` plus columns aliased to `Source` field names.
+VALUE_ADDED_SELECTS = (
+    ("sdss_id_stacked", _select_sdss_id_position),
+    ("sdss_id_flat", _select_n_associated),
+    ("unwise", _select_unwise),
+    ("glimpse", _select_glimpse),
+    ("bailer_jones_edr3", _select_bailer_jones),
+    ("gaia_dr3_synthetic_photometry_gspc", _select_gaia_synthetic_photometry),
+    ("gaia_stellar_parameters", _select_zhang_stellar_parameters),
+    ("allstar_dr17_synspec_rev1", _select_sdss4_apogee_targeting),
+)
+
+
+def _merge_value_added_catalogs(Source, cdb, meta: dict) -> dict:
+    """
+    Run each value-added catalog query against the temporary source table and
+    merge the rows into `meta` (only for `sdss_id`s already present).
+
+    A catalog that is unavailable on this database host (e.g., the Zhang et al.
+    table exists on operations but not on pipelines) is logged and skipped
+    rather than failing the whole batch.
+    """
+    from peewee import ProgrammingError
+    from almanac.logger import logger
+
+    for table_name, select in VALUE_ADDED_SELECTS:
+        try:
+            for item in select(Source, cdb).dicts().iterator():
+                sdss_id = item.pop("sdss_id")
+                if sdss_id in meta:
+                    merge_missing(meta[sdss_id], item)
+        except (ProgrammingError, AttributeError) as e:
+            # A failed statement aborts the transaction; roll back so the
+            # remaining queries on this connection can proceed.
+            try:
+                cdb.database.rollback()
+            except Exception:
+                pass
+            logger.warning(
+                f"Skipping catalogdb.{table_name} for this batch "
+                f"(table or column unavailable on this host?): {e}"
+            )
+    return meta
 
 
 def _query_catalog_once(sdss_ids: List[int], suffix=""):
@@ -280,6 +650,9 @@ def _query_catalog_once(sdss_ids: List[int], suffix=""):
     for item in q.iterator():
         sdss_id = item['sdss_id']
         meta[sdss_id] = merge_dicts(item, meta.get(sdss_id, {}))
+
+    _merge_value_added_catalogs(Source, cdb, meta)
+    add_derived_quantities(meta)
 
     q_cartons = (
         Source
