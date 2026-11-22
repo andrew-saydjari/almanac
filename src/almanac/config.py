@@ -28,9 +28,14 @@ class Config:
     database_retry_attempts: int = 5
     database_retry_backoff: float = 2.0  # seconds; doubles per attempt
 
-    # Worker processes for `almanac add metadata` catalog queries. Each worker
-    # opens its own database connection; keep this low when connecting through
-    # a single SSH tunnel.
+    # Default for --query-workers: the most database connections almanac's
+    # worker processes hold at once. `almanac add metadata`: number of query
+    # worker processes (one connection each). Main `almanac` command: the most
+    # file-building workers that hold a connection at once (the others keep
+    # reading files). Keep this low: the database is shared and often reached
+    # through a single SSH tunnel. (The number of file-building processes,
+    # --processes, defaults to the CPU budget: Slurm SLURM_CPUS_ON_NODE, else
+    # the CPU affinity, else all CPUs; see almanac/parallel.py.)
     catalog_query_max_workers: int = 4
 
     # Materialized view of (apogee_id, sdss_id) pairs (rank 1) to read for the

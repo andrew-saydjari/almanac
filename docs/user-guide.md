@@ -145,8 +145,9 @@ The CLI provides access to all available data columns automatically. Column sele
 
 **Parallel Processing**:
 ```bash
-almanac --processes 4      # Use 4 CPU cores
-almanac -p 8               # Use 8 CPU cores
+almanac                    # default: the CPU budget (SLURM_CPUS_ON_NODE in a Slurm job)
+almanac --processes 4      # Use 4 worker processes
+almanac -p 8 --query-workers 2   # 8 workers, at most 2 holding a database connection
 ```
 
 ## Data Structure Examples

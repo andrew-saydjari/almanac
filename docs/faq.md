@@ -246,17 +246,10 @@ almanac --fibers --mjd -1
 
 ### Q: How many processes should I use?
 
-**A:** Generally:
-- **Local machine**: Number of CPU cores (check with `nproc`)
-- **Shared systems**: Be conservative (2-4 processes)
-- **High I/O load**: Fewer processes may be faster
+**A:** Usually the default. Without `--processes`, almanac uses the CPU budget of the job: `SLURM_CPUS_ON_NODE` inside a Slurm job, otherwise the CPUs the process may run on. The database load is capped separately by `--query-workers` (default: the `catalog_query_max_workers` setting, 4). On a shared login node, pass a small `--processes` explicitly.
 
 ```bash
-# Check CPU cores
-nproc
-
-# Use half your cores
-almanac --processes $(expr $(nproc) / 2) --mjd-start -7
+almanac --processes 4 --mjd-start -7
 ```
 
 ## Configuration Issues

@@ -3,7 +3,7 @@
 import click
 
 
-def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None):
+def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None):
     """
     Initialize a process-pool worker.
 
@@ -13,13 +13,31 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None):
     (`--full-apogee-id-lookup`), so that workers do not each re-run the heavy
     query that builds it. Without one, workers query only the APOGEE IDs
     their nights need.
+
+    With `db_gate` (a multiprocessing semaphore; given when --processes is
+    larger than --query-workers), at most that many workers hold a database
+    connection at once (see `almanac.parallel`).
     """
+    from almanac import parallel
+
+    parallel.install_db_gate(db_gate)
+
     from sdssdb.peewee.sdss5db import database
 
     if hasattr(database, "_state"):
         database._state.closed = True
         database._state.conn = None
-    from almanac.database import database
+    if db_gate is not None:
+        # Importing almanac.database connects (if the module is not already
+        # inherited from the parent): do it inside a slot, then close.
+        with db_gate:
+            from almanac.database import database
+            try:
+                database.close()
+            except Exception:
+                pass
+    else:
+        from almanac.database import database
 
     from almanac import apogee
 
@@ -74,7 +92,21 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None):
 )
 @click.option("--output", "-O", default=None, type=str, help="Output file")
 @click.option(
-    "--processes", "-p", default=None, type=int, help="Number of processes to use"
+    "--processes", "-p", default=None, type=int,
+    help=(
+        "Worker processes (one observatory/MJD each). Default: the CPU budget "
+        "(Slurm SLURM_CPUS_ON_NODE, else the CPU affinity, else all CPUs); "
+        "negative values mean the same; 0 or 1 runs in this process. Never "
+        "more than the number of observatory/MJD pairs."
+    ),
+)
+@click.option(
+    "--query-workers", default=None, type=int,
+    help=(
+        "Most worker processes that hold a database connection at once "
+        "(default: the catalog_query_max_workers configuration setting). "
+        "Workers beyond this keep reading files while they wait."
+    ),
 )
 @click.option(
     "--skip-existing",
@@ -100,6 +132,7 @@ def main(
     live_apogee_id_join,
     output,
     processes,
+    query_workers,
     skip_existing,
 ):
     """
@@ -111,6 +144,7 @@ def main(
     if ctx.invoked_subcommand is not None:
         return  # Let Click handle the subcommand
 
+    import functools
     import h5py as h5
     from itertools import product
     from rich.live import Live
@@ -162,6 +196,29 @@ def main(
                     f"present in {output}"
                 )
             tasks = kept
+
+        from almanac import parallel
+
+        processes_resolved = parallel.resolve_processes(processes, n_tasks=len(tasks))
+        query_workers_resolved = parallel.resolve_query_workers(query_workers)
+        processes = processes_resolved[0]
+        query_workers = query_workers_resolved[0]
+        # Each worker queries the database for every night (opsdb expected
+        # exposures; the cross-match with --fibers). Cap the connections they
+        # hold at once when there are more workers than query workers.
+        use_db_gate = processes > 1 and processes > query_workers
+        logger.info(
+            f"Parallelism: {parallel.describe(processes_resolved, query_workers_resolved)}; "
+            + (
+                f"at most {query_workers} worker(s) hold a database connection at once"
+                if use_db_gate
+                else (
+                    "running in this process"
+                    if processes <= 1
+                    else f"each of the {processes} workers holds its own database connection"
+                )
+            )
+        )
 
         # All HDF5 writes during the run go through a dedicated writer thread
         # with a bounded queue, so the loop below can keep collecting worker
@@ -217,27 +274,50 @@ def main(
             apogee.set_apogee_id_lookup(full_lookup)
 
         with context_manager as live:
-            if processes is not None:
+            if processes > 1:
 
                 # Parallel
                 import os
+                import sys
                 import signal
+                import multiprocessing
                 import concurrent.futures
                 from concurrent.futures.process import BrokenProcessPool
 
-                if processes < 0:
-                    processes = os.cpu_count()
+                mp_context = multiprocessing.get_context()
+                db_gate = (
+                    mp_context.BoundedSemaphore(query_workers) if use_db_gate else None
+                )
+                if "almanac.database" in sys.modules:
+                    # The parent is done with the database (lookup-source
+                    # probe, optional full lookup): close its connection so
+                    # it neither counts against the database nor is shared
+                    # with forked workers.
+                    try:
+                        sys.modules["almanac.database"].database.close()
+                    except Exception:
+                        pass
 
                 # With --full-apogee-id-lookup, ship the parent-built full
                 # lookup to every worker through the pool initializer, so no
                 # worker re-runs the heavy query. Otherwise each worker
                 # queries (and memoises) only the APOGEE IDs its nights need.
-                initargs = (full_lookup, apogee_id_source)
+                initargs = (full_lookup, apogee_id_source, db_gate)
+                # With the gate, a worker frees its database slot (closing
+                # its connection) when it finishes a night.
+                task_fn = (
+                    functools.partial(
+                        parallel.run_task_releasing_db_slot, apogee.get_almanac_data
+                    )
+                    if use_db_gate
+                    else apogee.get_almanac_data
+                )
 
                 with concurrent.futures.ProcessPoolExecutor(
                     max_workers=processes,
                     initializer=_pool_initializer,
                     initargs=initargs,
+                    mp_context=mp_context,
                 ) as pool:
 
                     task_iter = iter(tasks)
@@ -246,7 +326,7 @@ def main(
                         for n, (mjd, observatory) in enumerate(task_iter, start=1):
                             futures[
                                 pool.submit(
-                                    apogee.get_almanac_data,
+                                    task_fn,
                                     observatory,
                                     mjd,
                                     fibers,
@@ -316,7 +396,7 @@ def main(
                             else:
                                 futures[
                                     pool.submit(
-                                        apogee.get_almanac_data,
+                                        task_fn,
                                         observatory,
                                         mjd,
                                         fibers,
@@ -641,7 +721,10 @@ def _get_sdss_ids(fp, obs, mjd):
 @click.option("--date-end", default=None, type=str, help="End of date range to query")
 @click.option("--apo", is_flag=True, help="Query Apache Point Observatory data")
 @click.option("--lco", is_flag=True, help="Query Las Campanas Observatory data")
-@click.option("--p", default=-1, type=int, help="Unused; kept for backwards compatibility")
+@click.option(
+    "--p", default=None, type=int, hidden=True,
+    help="Deprecated and ignored (warns): use --query-workers.",
+)
 @click.option(
     "--query-workers",
     default=None,
@@ -649,8 +732,9 @@ def _get_sdss_ids(fp, obs, mjd):
     help=(
         "Number of parallel database query workers (default: the "
         "catalog_query_max_workers configuration setting). Each worker opens "
-        "its own database connection; keep this low over an SSH tunnel. "
-        "0 runs the queries in this process (debugging)."
+        "its own database connection, so this is also the number of database "
+        "connections; keep it low over an SSH tunnel. 0 runs the queries in "
+        "this process (debugging)."
     ),
 )
 @click.option(
@@ -743,8 +827,18 @@ def metadata(
     mjds, *_ = utils.parse_mjds(
         mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True, mjds=mjds
     )
-    if query_workers is None:
-        query_workers = int(getattr(config, "catalog_query_max_workers", 4))
+    from almanac import logger, parallel
+
+    parallel.warn_deprecated_metadata_p(p)
+    query_workers_resolved = parallel.resolve_query_workers(
+        query_workers, config=config, allow_zero=True
+    )
+    query_workers = query_workers_resolved[0]
+    logger.info(
+        f"Parallelism: query workers={query_workers} "
+        f"(from {query_workers_resolved[1]}); one database connection each"
+        + (" (0: queries run in this process)" if query_workers == 0 else "")
+    )
     try:
         build_metadata(
             input_path,
@@ -908,7 +1002,11 @@ def flag(ctx, almanac_path, observatory, mjd, exposure, chip):
 @click.argument("input_path", type=str)
 @click.argument("output_prefix", type=str)
 @click.option(
-    "--processes", "-p", default=None, type=int, help="Number of processes to use"
+    "--processes", "-p", default=None, type=int,
+    help=(
+        "Worker processes. Default: the CPU budget (Slurm SLURM_CPUS_ON_NODE, "
+        "else the CPU affinity, else all CPUs); negative values mean the same."
+    ),
 )
 @click.option(
     "--limit", default=None, type=int, help="Limit number of spectra (for testing)"
@@ -943,8 +1041,11 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
         load_ar1d_unical_meta_batch,
     )
 
-    if processes is None or processes < 0:
-        processes = os.cpu_count()
+    from almanac import logger, parallel
+
+    processes_resolved = parallel.resolve_processes(processes)
+    processes = processes_resolved[0]
+    logger.info(f"Parallelism: {parallel.describe(processes_resolved)}")
 
     outdir = os.path.dirname(os.path.abspath(input_path)) + "/../"
     output_spectra_path = f"{output_prefix}exposures.h5"

@@ -84,7 +84,10 @@ almanac config set sdssdb.port 5432
 #### `catalog_query_max_workers`
 - **Type**: Integer
 - **Default**: `4`
-- **Description**: Number of parallel database query workers used by `almanac add metadata`. Each worker opens its own database connection, so keep this low when connecting through a single SSH tunnel. Can be overridden per run with `--query-workers`.
+- **Description**: Default for `--query-workers`, the most database connections almanac's worker processes hold at once. In `almanac add metadata` it is the number of query worker processes (one connection each). In the main `almanac` command it is the most file-building workers that hold a connection at once; the other workers keep reading files while they wait. Keep it low: the database is shared and often reached through a single SSH tunnel. Overridden per run with `--query-workers`. (An existing `~/.almanac/config.yaml` keeps the value written when it was created.)
+
+#### Number of processes (`--processes`)
+Not a configuration setting. `--processes`/`-p` (main command, `almanac postprocess`) defaults to the CPU budget of the job: `SLURM_CPUS_ON_NODE` inside a Slurm job (or the CPU affinity, if the process is pinned to fewer CPUs), else `len(os.sched_getaffinity(0))`, else `os.cpu_count()`. An explicit value always wins. The resolved numbers and where they came from are logged at startup.
 
 ### Data Processing Settings
 

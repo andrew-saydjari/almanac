@@ -6,6 +6,10 @@ through a single SSH tunnel. A momentarily dropped connection surfaces as a
 ``peewee.OperationalError`` or ``peewee.InterfaceError``; without a retry the
 whole run dies. These helpers retry such failures with exponential backoff,
 forcing a reconnect between attempts.
+
+Every wrapped call first takes a database slot when a cross-process cap on
+connections is installed (main-command pool workers with more processes than
+--query-workers; see ``almanac.parallel``).
 """
 
 from functools import wraps
@@ -72,6 +76,12 @@ def retry_on_database_error(fn=None, *, attempts=None, backoff=None, max_delay=6
                 if backoff is not None
                 else getattr(config, "database_retry_backoff", 2.0)
             )
+            # In main-command pool workers, wait for one of the
+            # --query-workers database slots (a no-op elsewhere; see
+            # almanac.parallel).
+            from almanac.parallel import acquire_db_slot
+
+            acquire_db_slot()
             for attempt in range(1, n_attempts + 1):
                 try:
                     return f(*args, **kwargs)
