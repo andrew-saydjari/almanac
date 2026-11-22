@@ -120,3 +120,121 @@ class Source(BaseModel):
         validate_by_name = True
         validate_assignment = True
         arbitrary_types_allowed = True
+
+
+class ExtendedSource(Source):
+    """
+    ``Source`` plus the value-added columns written by
+    ``almanac add metadata --extended``.
+
+    Adapted from upstream sdss/almanac a922dee (Andy Casey), where these fields
+    were added to ``Source`` itself. Here they live in a subclass so that the
+    default ``/meta`` keeps exactly the ``Source`` columns, and the extended
+    columns come after them. Upstream's 15 reddening fields (``ebv*``) are not
+    included: no query fills them, so they would always hold defaults.
+    """
+
+    #> SDSS_ID Position (SDSS_ID_Stacked, SDSS_ID_Flat)
+    ra: float = Field(default=float('NaN'), description="SDSS_ID right ascension (J2000) [deg]")
+    dec: float = Field(default=float('NaN'), description="SDSS_ID declination (J2000) [deg]")
+    l: float = Field(default=float('NaN'), description="Galactic longitude [deg]")
+    b: float = Field(default=float('NaN'), description="Galactic latitude [deg]")
+    healpix: int = Field(default=-1, description="HEALPix pixel (nside=128, RING ordering)")
+    n_associated: int = Field(default=-1, description="Number of SDSS_IDs associated with this catalogid")
+
+    #> unWISE Photometry
+    w1_mag: float = Field(default=float('NaN'), description="unWISE W1-band magnitude [Vega mag]")
+    e_w1_mag: float = Field(default=float('NaN'), description="Error on unWISE W1-band magnitude [mag]")
+    w1_flux: float = Field(default=float('NaN'), alias="flux_w1", description="unWISE W1-band flux [Vega nMgy]")
+    w1_dflux: float = Field(default=float('NaN'), alias="dflux_w1", description="Statistical uncertainty in unWISE W1-band flux [Vega nMgy]")
+    w1_frac: float = Field(default=float('NaN'), alias="fracflux_w1", description="unWISE W1-band flux fraction from this source (fracflux_w1)")
+    w2_mag: float = Field(default=float('NaN'), description="unWISE W2-band magnitude [Vega mag]")
+    e_w2_mag: float = Field(default=float('NaN'), description="Error on unWISE W2-band magnitude [mag]")
+    w2_flux: float = Field(default=float('NaN'), alias="flux_w2", description="unWISE W2-band flux [Vega nMgy]")
+    w2_dflux: float = Field(default=float('NaN'), alias="dflux_w2", description="Statistical uncertainty in unWISE W2-band flux [Vega nMgy]")
+    w2_frac: float = Field(default=float('NaN'), alias="fracflux_w2", description="unWISE W2-band flux fraction from this source (fracflux_w2)")
+    w1uflags: int = Field(default=0, alias="flags_unwise_w1", description="unWISE W1-band coadd flags (flags_unwise_w1)")
+    w2uflags: int = Field(default=0, alias="flags_unwise_w2", description="unWISE W2-band coadd flags (flags_unwise_w2)")
+    w1aflags: int = Field(default=0, alias="flags_info_w1", description="Additional unWISE W1-band flags (flags_info_w1)")
+    w2aflags: int = Field(default=0, alias="flags_info_w2", description="Additional unWISE W2-band flags (flags_info_w2)")
+
+    #> GLIMPSE Photometry
+    mag4_5: float = Field(default=float('NaN'), description="GLIMPSE 4.5um IRAC (Band 2) magnitude [mag]")
+    d4_5m: float = Field(default=float('NaN'), description="GLIMPSE 4.5um IRAC (Band 2) 1 sigma error [mag]")
+    rms_f4_5: float = Field(default=float('NaN'), description="RMS of detections for 4.5um IRAC (Band 2) [mJy]")
+    sqf_4_5: int = Field(default=0, description="GLIMPSE source quality flag for 4.5um IRAC (Band 2)")
+    mf4_5: int = Field(default=0, description="GLIMPSE flux calculation method flag for 4.5um IRAC (Band 2)")
+    csf: int = Field(default=0, description="GLIMPSE close source flag")
+
+    #> Bailer-Jones et al. (2021) Distances
+    r_med_geo: float = Field(default=float('NaN'), description="Median geometric distance from Bailer-Jones et al. (2021) [pc]")
+    r_lo_geo: float = Field(default=float('NaN'), description="16th percentile of geometric distance from Bailer-Jones et al. (2021) [pc]")
+    r_hi_geo: float = Field(default=float('NaN'), description="84th percentile of geometric distance from Bailer-Jones et al. (2021) [pc]")
+    r_med_photogeo: float = Field(default=float('NaN'), description="Median photogeometric distance from Bailer-Jones et al. (2021) [pc]")
+    r_lo_photogeo: float = Field(default=float('NaN'), description="16th percentile of photogeometric distance from Bailer-Jones et al. (2021) [pc]")
+    r_hi_photogeo: float = Field(default=float('NaN'), description="84th percentile of photogeometric distance from Bailer-Jones et al. (2021) [pc]")
+    bailer_jones_flags: str = Field(default="", description="Bailer-Jones et al. (2021) distance quality flags")
+
+    #> Gaia DR3 Synthetic Photometry (GSPC)
+    c_star: float = Field(default=float('NaN'), description="Gaia DR3 synthetic photometry: C* excess factor")
+    u_jkc_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic Johnson-Kron-Cousins U magnitude [mag]")
+    u_jkc_mag_flag: int = Field(default=0, alias="u_jkc_flag", description="Gaia DR3 synthetic Johnson-Kron-Cousins U magnitude flag")
+    b_jkc_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic Johnson-Kron-Cousins B magnitude [mag]")
+    b_jkc_mag_flag: int = Field(default=0, alias="b_jkc_flag", description="Gaia DR3 synthetic Johnson-Kron-Cousins B magnitude flag")
+    v_jkc_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic Johnson-Kron-Cousins V magnitude [mag]")
+    v_jkc_mag_flag: int = Field(default=0, alias="v_jkc_flag", description="Gaia DR3 synthetic Johnson-Kron-Cousins V magnitude flag")
+    r_jkc_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic Johnson-Kron-Cousins R magnitude [mag]")
+    r_jkc_mag_flag: int = Field(default=0, alias="r_jkc_flag", description="Gaia DR3 synthetic Johnson-Kron-Cousins R magnitude flag")
+    i_jkc_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic Johnson-Kron-Cousins I magnitude [mag]")
+    i_jkc_mag_flag: int = Field(default=0, alias="i_jkc_flag", description="Gaia DR3 synthetic Johnson-Kron-Cousins I magnitude flag")
+    u_sdss_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic SDSS u magnitude [mag]")
+    u_sdss_mag_flag: int = Field(default=0, alias="u_sdss_flag", description="Gaia DR3 synthetic SDSS u magnitude flag")
+    g_sdss_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic SDSS g magnitude [mag]")
+    g_sdss_mag_flag: int = Field(default=0, alias="g_sdss_flag", description="Gaia DR3 synthetic SDSS g magnitude flag")
+    r_sdss_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic SDSS r magnitude [mag]")
+    r_sdss_mag_flag: int = Field(default=0, alias="r_sdss_flag", description="Gaia DR3 synthetic SDSS r magnitude flag")
+    i_sdss_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic SDSS i magnitude [mag]")
+    i_sdss_mag_flag: int = Field(default=0, alias="i_sdss_flag", description="Gaia DR3 synthetic SDSS i magnitude flag")
+    z_sdss_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic SDSS z magnitude [mag]")
+    z_sdss_mag_flag: int = Field(default=0, alias="z_sdss_flag", description="Gaia DR3 synthetic SDSS z magnitude flag")
+    y_ps1_mag: float = Field(default=float('NaN'), description="Gaia DR3 synthetic Pan-STARRS1 y magnitude [mag]")
+    y_ps1_mag_flag: int = Field(default=0, alias="y_ps1_flag", description="Gaia DR3 synthetic Pan-STARRS1 y magnitude flag")
+
+    #> Zhang, Green & Rix (2023) Stellar Parameters
+    zgr_teff: float = Field(default=float('NaN'), description="Effective temperature from Zhang, Green & Rix (2023) [K]")
+    zgr_e_teff: float = Field(default=float('NaN'), description="Error on effective temperature from Zhang, Green & Rix (2023) [K]")
+    zgr_logg: float = Field(default=float('NaN'), description="Surface gravity from Zhang, Green & Rix (2023) [dex]")
+    zgr_e_logg: float = Field(default=float('NaN'), description="Error on surface gravity from Zhang, Green & Rix (2023) [dex]")
+    zgr_fe_h: float = Field(default=float('NaN'), description="[Fe/H] from Zhang, Green & Rix (2023) [dex]")
+    zgr_e_fe_h: float = Field(default=float('NaN'), description="Error on [Fe/H] from Zhang, Green & Rix (2023) [dex]")
+    zgr_e: float = Field(default=float('NaN'), description="Extinction from Zhang, Green & Rix (2023) [mag]")
+    zgr_e_e: float = Field(default=float('NaN'), description="Error on extinction from Zhang, Green & Rix (2023) [mag]")
+    zgr_plx: float = Field(default=float('NaN'), description="Parallax from Zhang, Green & Rix (2023) [mas]")
+    zgr_e_plx: float = Field(default=float('NaN'), description="Error on parallax from Zhang, Green & Rix (2023) [mas]")
+    zgr_teff_confidence: float = Field(default=float('NaN'), description="Confidence estimate in Zhang, Green & Rix (2023) effective temperature")
+    zgr_logg_confidence: float = Field(default=float('NaN'), description="Confidence estimate in Zhang, Green & Rix (2023) surface gravity")
+    zgr_fe_h_confidence: float = Field(default=float('NaN'), description="Confidence estimate in Zhang, Green & Rix (2023) [Fe/H]")
+    zgr_ln_prior: float = Field(default=float('NaN'), description="Log prior of Zhang, Green & Rix (2023) solution")
+    zgr_chi2: float = Field(default=float('NaN'), description="Chi-square value of Zhang, Green & Rix (2023) solution")
+    zgr_quality_flags: int = Field(default=0, description="Quality flags from Zhang, Green & Rix (2023)")
+
+    #> SDSS-IV APOGEE Targeting Flags (DR17 allStar)
+    sdss4_apogee_target1_flags: int = Field(default=0, alias="apogee_target1", description="SDSS-IV APOGEE-1 targeting flags (1/2)")
+    sdss4_apogee_target2_flags: int = Field(default=0, alias="apogee_target2", description="SDSS-IV APOGEE-1 targeting flags (2/2)")
+    sdss4_apogee2_target1_flags: int = Field(default=0, alias="apogee2_target1", description="SDSS-IV APOGEE-2 targeting flags (1/3)")
+    sdss4_apogee2_target2_flags: int = Field(default=0, alias="apogee2_target2", description="SDSS-IV APOGEE-2 targeting flags (2/3)")
+    sdss4_apogee2_target3_flags: int = Field(default=0, alias="apogee2_target3", description="SDSS-IV APOGEE-2 targeting flags (3/3)")
+    sdss4_apogee_member_flags: int = Field(default=0, alias="memberflag", description="SDSS-IV APOGEE likely cluster/galaxy member flags")
+    sdss4_apogee_extra_target_flags: int = Field(default=0, alias="extratarg", description="SDSS-IV APOGEE target information flags (EXTRATARG)")
+
+
+# Column groups of ExtendedSource (name -> fields), in column order.
+EXTENDED_COLUMN_GROUPS = {
+    "sdss_id_position": ("ra", "dec", "l", "b", "healpix", "n_associated",),
+    "unwise": ("w1_mag", "e_w1_mag", "w1_flux", "w1_dflux", "w1_frac", "w2_mag", "e_w2_mag", "w2_flux", "w2_dflux", "w2_frac", "w1uflags", "w2uflags", "w1aflags", "w2aflags",),
+    "glimpse": ("mag4_5", "d4_5m", "rms_f4_5", "sqf_4_5", "mf4_5", "csf",),
+    "bailer_jones": ("r_med_geo", "r_lo_geo", "r_hi_geo", "r_med_photogeo", "r_lo_photogeo", "r_hi_photogeo", "bailer_jones_flags",),
+    "gaia_synthetic_photometry": ("c_star", "u_jkc_mag", "u_jkc_mag_flag", "b_jkc_mag", "b_jkc_mag_flag", "v_jkc_mag", "v_jkc_mag_flag", "r_jkc_mag", "r_jkc_mag_flag", "i_jkc_mag", "i_jkc_mag_flag", "u_sdss_mag", "u_sdss_mag_flag", "g_sdss_mag", "g_sdss_mag_flag", "r_sdss_mag", "r_sdss_mag_flag", "i_sdss_mag", "i_sdss_mag_flag", "z_sdss_mag", "z_sdss_mag_flag", "y_ps1_mag", "y_ps1_mag_flag",),
+    "zgr23": ("zgr_teff", "zgr_e_teff", "zgr_logg", "zgr_e_logg", "zgr_fe_h", "zgr_e_fe_h", "zgr_e", "zgr_e_e", "zgr_plx", "zgr_e_plx", "zgr_teff_confidence", "zgr_logg_confidence", "zgr_fe_h_confidence", "zgr_ln_prior", "zgr_chi2", "zgr_quality_flags",),
+    "sdss4_apogee_targeting": ("sdss4_apogee_target1_flags", "sdss4_apogee_target2_flags", "sdss4_apogee2_target1_flags", "sdss4_apogee2_target2_flags", "sdss4_apogee2_target3_flags", "sdss4_apogee_member_flags", "sdss4_apogee_extra_target_flags",),
+}
