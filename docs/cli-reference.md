@@ -141,21 +141,34 @@ Long queries are fault-isolated per observatory/MJD pair:
 ## Metadata Commands
 
 ### `almanac add metadata <file>`
-Decorate an existing almanac HDF5 file (created with `--fibers`) with astrometry, photometry, and targeting flags for every cross-matched target. Results are written to a `meta/` group in the same file, queried once per unique `sdss_id`.
+Build a `meta/` group (one row per unique `sdss_id`: catalog cross-match ids, Gaia DR3 astrometry and photometry, 2MASS photometry, SDSS-V targeting flags) from the `sdss_id` in an almanac HDF5 file created with `--fibers`.
+
+**Recommended workflow: never write the almanac file the pipeline reads.** Either decorate a copy, or write a targets-only file:
 
 ```bash
-almanac add metadata results.h5
-almanac add metadata results.h5 --mjds 58011,59337 --apo
-almanac add metadata results.h5 --query-workers 4
+cp results.h5 results_meta.h5
+almanac add metadata results_meta.h5 --query-workers 4          # decorate the COPY in place
+almanac add metadata results.h5 --output targets.h5              # INPUT opened read-only
+almanac add metadata new.h5 --output targets_new.h5 --since targets.h5   # incremental
 ```
+
+**Resumable.** The `sdss_id` are queried in batches (`--batch-size`, default 10,000). Each finished batch is written to `<output or INPUT>.meta-checkpoint/batch_NNNNNN.h5` (temporary name, then rename) and `progress.json` is updated. If the run is killed, or a batch still fails after the per-query reconnect retries, re-running the same command continues from the finished batches; failed batches are re-run after a backoff (`--retry-backoff`, doubling, at most 30 min) up to `--max-batch-attempts` times. A checkpoint made for a different `sdss_id` set or batch size is refused (`--fresh` discards it).
+
+**Atomic final write.** `/meta` is assembled once all batches are done. With `--output` the file is written under a temporary name and renamed; in place, the group is written as `meta__tmp` and renamed to `meta`. A reader never sees a half-written `/meta`. The ids that were queried but not found are kept in `meta_not_found/sdss_id`. Every carton the database returned is kept in `meta_carton_pks/{sdss_id, carton_pk}` (one row per pair), because `sdss5_target_flags` can only encode the cartons the installed `sdss_semaphore` knows (the others are listed in the `unknown_carton_pks` attribute).
+
+**Provenance** (attributes on `/meta`): `almanac_version`, `almanac_commit`, `input_path`, `output_path`, `mode`, `n_sdss_id`, `n_sdss_id_input`, `n_queried`, `n_copied_from_since`, `n_not_found`, `database_host`, `database_name`, `query_start_utc`, `query_end_utc`, `columns`, `since_used`, `since_path`, `restrict_to`, `batch_size`, `query_workers`, `sdss_semaphore_version`, `unknown_carton_pks`, `sdss_id_set_sha256`.
 
 **Options**:
 - Date/MJD selection: `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, `--date`, `--date-start`/`--date-end` (defaults to every MJD present in the file)
 - Observatory selection: `--apo`, `--lco`
-- `--p <integer>`: Number of workers used to read `sdss_id` values from the file
-- `--query-workers <integer>`: Number of parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection; keep this low when connecting through a single SSH tunnel.
+- `--query-workers <integer>`: parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection. `0` runs the queries in-process.
+- `--output, -O <file>`: write `/meta` to this new file; INPUT is opened read-only.
+- `--since <file>`: copy the `/meta` rows of a previously decorated file or targets file and query only the `sdss_id` it lacks (ids it recorded as not found are not re-queried unless `--retry-not-found`).
+- `--restrict-to <file>`: only build rows for these `sdss_id` (`.npy`, `.h5` with `/meta/sdss_id` or `/sdss_id`, or text with one id per line).
+- `--checkpoint-dir <dir>`, `--batch-size <n>`, `--fresh`, `--keep-checkpoint`, `--max-batch-attempts <n>`, `--retry-backoff <s>`
+- `--p <integer>`: unused, kept for compatibility.
 
-**Operational note — run this database-local.** `add metadata` throughput is strongly sensitive to database locality and cache state. Measured on a full-survey file (~4.7 million unique `sdss_id`s) with the database on the local network: ~660 ids/s (cold catalog cache; ~2h15m wall), versus 13,000–26,000 ids/s on small warmed-up slices. Over an SSH tunnel the same pass becomes impractically slow. Run `add metadata` on a host local to the SDSS database (e.g. at Utah), never through a tunnel, and budget memory for the result set (all query results are held in RAM until the final write; ~18 GB for ~4.7M sources).
+**Operational note — run this database-local.** `add metadata` throughput is strongly sensitive to database locality and cache state. Measured on a full-survey file (~4.7 million unique `sdss_id`s) with the database on the local network: ~660 ids/s (cold catalog cache; ~2h15m wall), versus 13,000–26,000 ids/s on small warmed-up slices. Over an SSH tunnel the same pass becomes impractically slow. Run `add metadata` on a host local to the SDSS database (e.g. at Utah), never through a tunnel, and budget memory for the final assembly (the finished batches are read back into RAM for the single final write).
 
 ## Configuration Commands
 

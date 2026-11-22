@@ -641,7 +641,7 @@ def _get_sdss_ids(fp, obs, mjd):
 @click.option("--date-end", default=None, type=str, help="End of date range to query")
 @click.option("--apo", is_flag=True, help="Query Apache Point Observatory data")
 @click.option("--lco", is_flag=True, help="Query Las Campanas Observatory data")
-@click.option("--p", default=-1, type=int, help="Number of workers to use")
+@click.option("--p", default=-1, type=int, help="Unused; kept for backwards compatibility")
 @click.option(
     "--query-workers",
     default=None,
@@ -649,9 +649,42 @@ def _get_sdss_ids(fp, obs, mjd):
     help=(
         "Number of parallel database query workers (default: the "
         "catalog_query_max_workers configuration setting). Each worker opens "
-        "its own database connection; keep this low over an SSH tunnel."
+        "its own database connection; keep this low over an SSH tunnel. "
+        "0 runs the queries in this process (debugging)."
     ),
 )
+@click.option(
+    "--output", "-O", "output_path", default=None, type=str,
+    help=(
+        "Write /meta to this new file (a targets-only file) and open INPUT read-only. "
+        "Without it /meta is written into INPUT (run that on a COPY)."
+    ),
+)
+@click.option(
+    "--since", default=None, type=str,
+    help=(
+        "A previously decorated almanac file or targets file: its /meta rows are copied "
+        "and only the sdss_id it lacks are queried."
+    ),
+)
+@click.option(
+    "--restrict-to", default=None, type=str,
+    help="Only build rows for sdss_id listed in this file (.npy, .h5 with /meta/sdss_id or /sdss_id, or text).",
+)
+@click.option(
+    "--checkpoint-dir", default=None, type=str,
+    help="Directory for per-batch checkpoints (default: <output or INPUT>.meta-checkpoint).",
+)
+@click.option("--batch-size", default=10_000, type=int, show_default=True,
+              help="sdss_id per database batch (the unit of checkpointing).")
+@click.option("--fresh", is_flag=True, help="Discard an existing checkpoint instead of resuming from it.")
+@click.option("--keep-checkpoint", is_flag=True, help="Keep the checkpoint directory after the final write.")
+@click.option("--retry-not-found", is_flag=True,
+              help="With --since, query again the ids the previous build did not find.")
+@click.option("--max-batch-attempts", default=8, type=int, show_default=True,
+              help="Give up (keeping the checkpoint) after a batch fails this many times.")
+@click.option("--retry-backoff", default=60.0, type=float, show_default=True,
+              help="Base delay [s] before re-running failed batches (doubles each round, max 30 min).")
 def metadata(
     input_path,
     mjd,
@@ -665,88 +698,60 @@ def metadata(
     lco,
     p,
     query_workers,
+    output_path,
+    since,
+    restrict_to,
+    checkpoint_dir,
+    batch_size,
+    fresh,
+    keep_checkpoint,
+    retry_not_found,
+    max_batch_attempts,
+    retry_backoff,
     **kwargs,
 ):
-    """Add astrometry and photometry to an existing Almanac file."""
+    """Add astrometry, photometry and targeting flags (/meta) for every sdss_id.
 
-    import os
-    import h5py as h5
-    import concurrent.futures
-    from itertools import product
-    from almanac import utils
-    from almanac.catalog import query
-    from tqdm import tqdm
+    \b
+    Recommended workflow (the almanac file the pipeline reads is never written):
+      cp almanac.h5 almanac_meta.h5
+      almanac add metadata almanac_meta.h5 --query-workers 4      # decorate the COPY
+    or write a targets-only file and leave INPUT untouched:
+      almanac add metadata almanac.h5 --output targets.h5
+    Incremental (only new sdss_id are queried):
+      almanac add metadata new.h5 --output targets_new.h5 --since targets_old.h5
 
-    if p <= 0:
-        p += os.cpu_count()
+    Finished batches are checkpointed; re-running the same command resumes.
+    The final /meta is written in one step (temporary file or group, then rename).
+    """
+    from almanac import utils, config
+    from almanac.metadata import build_metadata, MetadataBuildError
 
     observatories = utils.get_observatories(apo, lco)
     mjds, *_ = utils.parse_mjds(
         mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True, mjds=mjds
     )
-    sdss_ids = set()
-    with h5.File(input_path, "r") as fp:
-        if mjds is None:
-            mjds = []
-            for obs in observatories:
-                if f"raw/{obs}" in fp:
-                    mjds.extend(fp[f"raw/{obs}"])
-            mjds = list(set(mjds))
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=p) as executor:
-            futures = [
-                executor.submit(_get_sdss_ids, fp, o, m)
-                for o, m in product(observatories, mjds)
-            ]
-            for future in tqdm(
-                concurrent.futures.as_completed(futures),
-                desc="Collecting SDSS identifiers",
-            ):
-                sdss_ids.update(future.result())
-
-    from almanac.data_models.source import Source
-    from almanac.io import write_models_to_hdf5_group, get_or_create_group, delete_hdf5_entry
-    from sdss_semaphore.targeting import TargetingFlags
-    import numpy as np
-
-    results = query(sdss_ids, max_workers=query_workers)
-
-    # Compute sdss5_target_flags from carton_pks
-    # First pass: collect all sources and their carton_pks
-    sdss_id_list = list(results.keys())
-    carton_pks_list = []
-    for sdss_id in sdss_id_list:
-        carton_pks = results[sdss_id].pop("carton_pks", set())
-        carton_pks_list.append(list(carton_pks) if carton_pks else [])
-
-    # Initialize targeting flags array. Guard the empty case: sdss_semaphore's
-    # TargetingFlags indexes array[0] during construction, so zero cross-matched
-    # sources (e.g. plate-era nights with no sdss_id matches) would IndexError.
-    unknown_carton_pks = set()
-    if sdss_id_list:
-        flags = TargetingFlags(np.zeros((len(sdss_id_list), 1)))
-
-        # Set bits for each source based on their carton_pks
-        for i, carton_pks in enumerate(carton_pks_list):
-            for carton_pk in carton_pks:
-                try:
-                    flags.set_bit_by_carton_pk(i, carton_pk)
-                except KeyError:
-                    unknown_carton_pks.add(carton_pk)
-
-    # Convert dict of dicts to list of Source models for HDF5 writing
-    sources = []
-    for i, sdss_id in enumerate(sdss_id_list):
-        data = results[sdss_id]
-        # Add computed target flags
-        data["sdss5_target_flags"] = flags.array[i:i+1]
-        sources.append(Source(**data))
-
-    # Write to HDF5 meta group
-    with h5.File(input_path, "a") as fp:
-        delete_hdf5_entry(fp, "meta")
-        meta_group = fp.create_group("meta", track_order=True)
-        write_models_to_hdf5_group(sources, meta_group)
+    if query_workers is None:
+        query_workers = int(getattr(config, "catalog_query_max_workers", 4))
+    try:
+        build_metadata(
+            input_path,
+            output_path=output_path,
+            since=since,
+            restrict_to=restrict_to,
+            observatories=observatories,
+            mjds=mjds,
+            query_workers=query_workers,
+            batch_size=batch_size,
+            checkpoint_dir=checkpoint_dir,
+            fresh=fresh,
+            keep_checkpoint=keep_checkpoint,
+            retry_not_found=retry_not_found,
+            max_batch_attempts=max_batch_attempts,
+            retry_backoff=retry_backoff,
+        )
+    except MetadataBuildError as e:
+        raise click.ClickException(str(e))
 
 
 def _postprocess_chunk_worker(args):
