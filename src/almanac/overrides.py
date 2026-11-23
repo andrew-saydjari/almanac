@@ -15,13 +15,26 @@ names an observatory, an MJD, a set of exposures and one action:
 
 ``retarget_fibers``
     The listed fibers saw a named object that is not the catalogue target
-    (e.g. ``VESTA``). Those fibers get category ``retargeted``, ``sdss_id``
-    -1 and ``override_target`` = the name. ``other_fibers`` must say what
-    happened to the remaining fibers: ``keep`` (unchanged) or ``offtarget``
-    (the telescope was pointed elsewhere, so no fiber that asserts a target
-    identity saw its target; they become ``offtarget`` with ``sdss_id`` -1).
-    The affected exposures get their own fiber table, named by the exposure
-    column ``fiber_map_key``.
+    (e.g. ``VESTA``, ``HD 196944``). Every name must be a target of
+    ``almanac/etc/handplaced_targets.yaml``, which holds its targeting
+    information. The fiber's row is rewritten with that information
+    *before* the cross-match, so the ordinary almanac path then assigns its
+    ``sdss_id`` (and ``almanac add metadata`` later decorates it) exactly as
+    for a plugged fiber:
+
+    * a star: category ``science``, the star's 2MASS designation (or SDSS-V
+      ``catalogid`` if it has none), ra and dec;
+    * a solar-system body (no fixed position, no catalogue entry): category
+      ``retargeted``, ra/dec NaN, no designation, and ``sdss_id`` =
+      ``solar_system_sdss_id`` of the targets file.
+
+    Either way ``override_target`` = the name, ``override_id`` = the entry
+    and ``original_category`` = the plugmap category. ``other_fibers`` must
+    say what happened to the remaining fibers: ``keep`` (unchanged) or
+    ``offtarget`` (the telescope was pointed elsewhere, so no fiber that
+    asserts a target identity saw its target; they become ``offtarget`` with
+    ``sdss_id`` -1). The affected exposures get their own fiber table, named
+    by the exposure column ``fiber_map_key``.
 ``use_config``
     The exposure's fibers were at configuration ``config_id``, not at the one
     in the header.
@@ -58,9 +71,15 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml
 
-#: Category given to a fiber that an override says saw a named, non-catalogue
-#: object (see ``retarget_fibers``). Never cross-matched to an ``sdss_id``.
+#: Category given to a fiber that an override says saw a named object with no
+#: catalogue entry (a solar-system body; see ``retarget_fibers``). Not
+#: cross-matched: its ``sdss_id`` is ``solar_system_sdss_id``.
 from almanac.data_models.types import RETARGETED_CATEGORY  # noqa: E402
+
+#: Category given to a fiber that an override says saw a named star: the row
+#: then carries the star's targeting information and is cross-matched like
+#: any plugged science fiber.
+HANDPLACED_STAR_CATEGORY = "science"
 
 ACTIONS = (
     "retarget_fibers",
@@ -283,6 +302,113 @@ def _default_text() -> str:
     return (resources.files("almanac.etc") / "exposure_overrides.yaml").read_text()
 
 
+# ---------------------------------------------------------------------------
+# Hand-placed targets (almanac/etc/handplaced_targets.yaml)
+# ---------------------------------------------------------------------------
+
+_TARGET_KINDS = ("star", "solar_system")
+
+
+@dataclass(frozen=True)
+class HandplacedTarget:
+    """Targeting information that replaces a retargeted fiber's plugmap row."""
+    name: str
+    kind: str
+    ra: float = float("nan")
+    dec: float = float("nan")
+    twomass_designation: str = ""
+    catalogid: int = -1
+
+
+@dataclass(frozen=True)
+class HandplacedTargets:
+    targets: Dict[str, HandplacedTarget]
+    solar_system_sdss_id: int
+
+
+def parse_handplaced_targets(text: str) -> HandplacedTargets:
+    """Parse and validate the YAML text of a hand-placed targets file."""
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise OverrideError(f"Hand-placed targets file is not valid YAML: {e}") from e
+    if not isinstance(doc, dict) or set(doc) != {"version", "solar_system_sdss_id", "targets"}:
+        raise OverrideError(
+            "Hand-placed targets file must be a mapping with exactly "
+            "'version', 'solar_system_sdss_id' and 'targets'"
+        )
+    if doc["version"] != 1:
+        raise OverrideError(f"Unsupported hand-placed targets file version {doc['version']!r}")
+    ssid = doc["solar_system_sdss_id"]
+    if isinstance(ssid, bool) or not isinstance(ssid, int):
+        raise OverrideError(f"solar_system_sdss_id must be an int, got {ssid!r}")
+    raw = doc["targets"]
+    if not isinstance(raw, dict) or not raw:
+        raise OverrideError("'targets' must be a non-empty mapping name -> target")
+    out = {}
+    for name, t in raw.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(t, dict):
+            raise OverrideError(f"Hand-placed target {name!r} must be a mapping under a non-empty name")
+        kind = t.get("kind")
+        if kind not in _TARGET_KINDS:
+            raise OverrideError(f"Hand-placed target {name!r}: kind must be one of {_TARGET_KINDS}, got {kind!r}")
+        if kind == "solar_system":
+            if not str(t.get("jpl_horizons_id", "")).strip():
+                raise OverrideError(f"Hand-placed target {name!r}: a solar_system target needs jpl_horizons_id")
+            out[name] = HandplacedTarget(name=name, kind=kind)
+            continue
+        try:
+            ra, dec = float(t["ra"]), float(t["dec"])
+        except (KeyError, TypeError, ValueError):
+            raise OverrideError(f"Hand-placed target {name!r}: a star needs numeric ra and dec")
+        if not (0.0 <= ra < 360.0 and -90.0 <= dec <= 90.0):
+            raise OverrideError(f"Hand-placed target {name!r}: ra/dec out of range ({ra}, {dec})")
+        designation = str(t.get("twomass_designation") or "").strip()
+        if designation and not re.fullmatch(r"\d{8}[+-]\d{7}", designation):
+            raise OverrideError(
+                f"Hand-placed target {name!r}: twomass_designation must look like "
+                f"'14153968+1910558', got {designation!r}"
+            )
+        catalogid = t.get("catalogid", -1)
+        if isinstance(catalogid, bool) or not isinstance(catalogid, int):
+            raise OverrideError(f"Hand-placed target {name!r}: catalogid must be an int")
+        if not designation and catalogid <= 0:
+            raise OverrideError(f"Hand-placed target {name!r}: a star needs a twomass_designation or a catalogid")
+        out[name] = HandplacedTarget(
+            name=name, kind=kind, ra=ra, dec=dec,
+            twomass_designation=designation, catalogid=catalogid if catalogid > 0 else -1,
+        )
+    return HandplacedTargets(targets=out, solar_system_sdss_id=ssid)
+
+
+def _default_targets_text() -> str:
+    return (resources.files("almanac.etc") / "handplaced_targets.yaml").read_text()
+
+
+_targets_cache: Optional[HandplacedTargets] = None
+
+
+def load_handplaced_targets(text: Optional[str] = None) -> HandplacedTargets:
+    """Load (and cache) the packaged hand-placed targets file, or parse ``text``."""
+    global _targets_cache
+    if text is not None:
+        return parse_handplaced_targets(text)
+    if _targets_cache is None:
+        _targets_cache = parse_handplaced_targets(_default_targets_text())
+    return _targets_cache
+
+
+def check_target_names(entries: List[Override], targets: HandplacedTargets) -> None:
+    """Every ``retarget_fibers`` name must be a hand-placed target."""
+    for e in entries:
+        for fiber, name in e.fibers.items():
+            if name not in targets.targets:
+                raise OverrideError(
+                    f"{e.id}: fiber {fiber} names {name!r}, which is not a target of "
+                    f"handplaced_targets.yaml"
+                )
+
+
 _cache: Optional[Tuple[str, List[Override]]] = None
 
 
@@ -293,7 +419,9 @@ def load_overrides(text: Optional[str] = None) -> List[Override]:
         return parse_overrides(text)
     if _cache is None:
         t = _default_text()
-        _cache = (t, parse_overrides(t))
+        entries = parse_overrides(t)
+        check_target_names(entries, load_handplaced_targets())
+        _cache = (t, entries)
     return _cache[1]
 
 
@@ -302,11 +430,17 @@ def overrides_sha256() -> str:
     return hashlib.sha256(_default_text().encode()).hexdigest()
 
 
+def handplaced_targets_sha256() -> str:
+    """SHA-256 of the packaged hand-placed targets file (recorded in the output)."""
+    return hashlib.sha256(_default_targets_text().encode()).hexdigest()
+
+
 def overrides_attrs(enabled: bool) -> Dict[str, str]:
     """Per-night HDF5 attributes that record whether overrides were applied."""
     attrs = {"exposure_overrides": "enabled" if enabled else "disabled"}
     if enabled:
         attrs["exposure_overrides_sha256"] = overrides_sha256()
+        attrs["handplaced_targets_sha256"] = handplaced_targets_sha256()
     return attrs
 
 
@@ -416,16 +550,41 @@ def apply_exposure_overrides(exposures, entries: List[Override]) -> None:
                 _note(e, entry, f"{entry.action}({header_config}->{new_config})")
 
 
-def apply_fiber_overrides(exposures, entries: List[Override]) -> None:
+def _retarget_row(t, entry: Override, target: HandplacedTarget, solar_system_sdss_id: int) -> None:
+    """Replace a fiber row's targeting information with a hand-placed target's."""
+    t.original_category = t.category
+    t.override_id = entry.id
+    t.override_target = target.name
+    t.target_ids = ""
+    if target.kind == "star":
+        t.category = HANDPLACED_STAR_CATEGORY
+        t.twomass_id = target.twomass_designation
+        t.catalogid = target.catalogid
+        t.ra, t.dec = target.ra, target.dec
+        t.sdss_id = -1  # assigned by the ordinary cross-match
+    else:
+        t.category = RETARGETED_CATEGORY
+        t.twomass_id = ""
+        t.catalogid = -1
+        t.ra = t.dec = float("nan")
+        t.sdss_id = solar_system_sdss_id
+
+
+def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[HandplacedTargets] = None) -> None:
     """
     Apply the fiber edits of ``retarget_fibers`` entries in place. Must run
-    after ``sdss_id`` assignment: each affected exposure gets a copy of the
+    BEFORE ``sdss_id`` assignment: each affected exposure gets a copy of the
     fiber table that would otherwise be written for its plate/configuration,
-    edited, and stored under its own ``fiber_map_key``.
+    with the retargeted rows rewritten from ``handplaced_targets.yaml``
+    (``targets``; default: the packaged file), stored under its own
+    ``fiber_map_key``. The cross-match that follows then treats the edited
+    rows like any other (see :func:`almanac.apogee.get_almanac_data`).
     """
     entries = [e for e in entries if e.action == "retarget_fibers"]
     if not entries:
         return
+    targets = load_handplaced_targets() if targets is None else targets
+    check_target_names(entries, targets)
 
     # The table io would write for each key: that of the first exposure with
     # that key and any targets (it carries the sdss_id assignments).
@@ -459,11 +618,7 @@ def apply_fiber_overrides(exposures, entries: List[Override]) -> None:
         for t in new:
             if t.fiber_id in retarget:
                 entry, name = retarget[t.fiber_id]
-                t.original_category = t.category if t.category != "" else ""
-                t.category = RETARGETED_CATEGORY
-                t.sdss_id = -1
-                t.override_id = entry.id
-                t.override_target = name
+                _retarget_row(t, entry, targets.targets[name], targets.solar_system_sdss_id)
             elif offtarget_entry is not None:
                 from almanac.data_models.types import asserts_target_identity, OFF_TARGET_CATEGORY
                 if asserts_target_identity(t.category):
@@ -475,8 +630,8 @@ def apply_fiber_overrides(exposures, entries: List[Override]) -> None:
         _set_targets(e, tuple(sorted(new, key=lambda t: t.fiber_id)))
         e._fiber_map_key = f"{key}.override.{'+'.join(x.id for x in es)}"
 
-    # Make sure the unmodified table for each key is still written from a
-    # target list that carries the sdss_id assignments, even when the first
+    # Make sure the unmodified table for each key is still written (and
+    # cross-matched) from the reference target list, even when the first
     # exposure of a sequence is one of the overridden exposures.
     for key, targets in reference.items():
         for e in exposures:

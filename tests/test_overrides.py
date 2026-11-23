@@ -13,6 +13,7 @@ from almanac.overrides import (
     OverrideError,
     apply_exposure_overrides,
     apply_fiber_overrides,
+    load_handplaced_targets,
     load_overrides,
     overrides_attrs,
     overrides_for,
@@ -52,6 +53,15 @@ def plate_target(fiber_id, category="science", sdss_id=1000):
         dec=-25.0,
         fiberId=fiber_id,
     )
+
+
+TEST_TARGETS = load_handplaced_targets(textwrap.dedent("""
+    version: 1
+    solar_system_sdss_id: 0
+    targets:
+      VESTA: {kind: solar_system, jpl_horizons_id: "4"}
+      HD 1: {kind: star, ra: 1.25, dec: 67.8, twomass_designation: "00050000+6748000"}
+"""))
 
 
 def make_exposures(n=6, plate=5099):
@@ -187,7 +197,7 @@ class TestApply:
             entry(id="star", exposures="4", action="retarget_fibers", fibers={3: "HD 1"}, other_fibers="keep"),
         ))
         apply_exposure_overrides(exposures, entries)
-        apply_fiber_overrides(exposures, entries)
+        apply_fiber_overrides(exposures, entries, TEST_TARGETS)
 
         e1, e2, e3, e4 = exposures[:4]
         # Exposure 1 was the sdss_id carrier and is overridden: the plain table
@@ -199,15 +209,20 @@ class TestApply:
         assert e4.fiber_map_key == "5099.override.star"
 
         t = {x.fiber_id: x for x in e1.targets}
+        # A solar-system body: no catalogue identity, sdss_id = solar_system_sdss_id.
         assert t[2].category == RETARGETED_CATEGORY and t[2].override_target == "VESTA"
-        assert t[2].sdss_id == -1 and t[2].original_category == "science" and t[2].override_id == "vesta"
-        assert t[2].twomass_designation == "2M00000002-0000000"  # original identity kept for provenance
+        assert t[2].sdss_id == 0 and t[2].original_category == "science" and t[2].override_id == "vesta"
+        assert t[2].twomass_designation == "" and t[2].catalogid == -1
+        assert t[2].ra != t[2].ra and t[2].dec != t[2].dec  # NaN: no fixed position
         for f in (1, 3):
             assert t[f].category == OFF_TARGET_CATEGORY and t[f].sdss_id == -1 and t[f].override_id == "vesta"
         assert t[4].category == "sky_apogee" and t[4].override_id == ""
 
         t4 = {x.fiber_id: x for x in e4.targets}
-        assert t4[3].category == RETARGETED_CATEGORY and t4[3].override_target == "HD 1"
+        # A star: the row carries the star's targeting information, to be cross-matched.
+        assert t4[3].category == "science" and t4[3].override_target == "HD 1" and t4[3].override_id == "star"
+        assert t4[3].twomass_designation == "00050000+6748000" and (t4[3].ra, t4[3].dec) == (1.25, 67.8)
+        assert t4[3].sdss_id == -1 and t4[3].original_category == "science"
         assert t4[1].category == "science" and t4[1].sdss_id == 1001 and t4[1].override_id == ""
         assert "retarget_fibers(2=VESTA;others=offtarget)" == e1.override_actions
         assert not assigns_sdss_id(RETARGETED_CATEGORY)

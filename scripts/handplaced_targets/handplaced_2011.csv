@@ -1,0 +1,228 @@
+mjd,exposure,plate,fiber,target,action,fiber_source,data_verdict,data_brightest_fiber,data_snr_mad,sep_hdr_star_arcsec,sep_hdr_plate_centre_deg,hdr_obscmnt,log_lines,note
+55699,100,4822,243,HD 93288,retarget_fibers,log,MATCH,243,466.2,5.1,49.78,trying new abort dsp code,"-100 Starting a series of RV standard exposures (HD93288, K0 III) | 100 Fiber #243",
+55699,101,4822,243,HD 93288,retarget_fibers,log-inherit,MATCH,243,2684.4,5.1,49.78,trying new abort dsp code,101 Longer exposure (25 reads),
+55699,102,4822,246,HD 93288,retarget_fibers,log,MATCH,246,1106.6,5.1,49.78,trying new abort dsp code,102 Different fiber (#246) Peak 3995 at c3000,
+55699,103,4822,244,HD 93288,retarget_fibers,log,MATCH,244,263.2,5.0,49.78,trying new abort dsp code,103 Fiber #244 Peak 940 at c3000,
+55699,104,4822,242,HD 93288,retarget_fibers,log,MATCH,242,606.3,5.0,49.78,trying new abort dsp code,104 Fiber #242 Peak 2185 at c3000,
+55699,141,4817,162,HD 122563,retarget_fibers,log,MATCH,162,2541.2,7.2,42.87,zero offset,-141 Metal-poor star (HD 122563) on fiber #162. RefractionBalance=0,
+55699,142,4817,162,HD 122563,retarget_fibers,log-inherit,MATCH,162,1984.7,7.2,42.87,zero offset,142 Same as 141 except RB=1,
+55699,143,4817,162,HD 122563,retarget_fibers,log-inherit,MATCH,162,5736.4,7.2,42.87,zero offset,143 Same as 142 but longer (9 reads),
+55699,144,4817,170,HD 122563,retarget_fibers,log,MATCH,170,2954.6,7.2,42.87,zero offset,144 Same as 143 but in fiber #170,
+55699,145,4817,160,HD 122563,retarget_fibers,log,MATCH,160,2965.5,7.2,42.87,zero offset,145 Same as 143 but in fiber #160,
+55699,146,4817,173,HD 122563,retarget_fibers,log,MATCH,173,2640.7,7.2,42.87,zero offset,146 Same as 143 but in fiber #173,
+55699,147,4817,162,HD 115444,retarget_fibers,log,MATCH,162,1220.4,10.7,67.06,zero offset,147 Metal-poor r-process rich star (HD 115444) on fiber #162,
+55699,148,4817,170,HD 115444,retarget_fibers,log,MATCH,170,2048.3,10.7,67.06,zero offset,"148 Same as above, on fiber #170",
+55700,90,4932,160,BD+17 3248,retarget_fibers,log,MATCH,160,41.4,3.1,41.2,zero offset,-90 BD+17 3248 Metallicity standard r-process-rich star | 90 Fiber 160,
+55700,91,4932,160,BD+17 3248,retarget_fibers,log,MATCH,160,237.9,3.1,41.2,zero offset,91 Fiber 160,
+55700,92,4932,160,BD+17 3248,retarget_fibers,log,MATCH,160,330.5,3.5,41.2,zero offset,92 Fiber 160. Longer read (30 reads),
+55701,18,4918,45,mu Leo,retarget_fibers,log,MATCH,45,5129.2,5.8,39.66,mu Leo,"0018 mu Leo -- metal rich giant star, fiber 45",
+55701,19,4918,38,mu Leo,retarget_fibers,log,MATCH,38,1378.4,5.8,39.66,mu Leo,"0019 mu Leo -- metal rich giant star, fiber 38",
+55701,20,4918,41,mu Leo,retarget_fibers,log,MATCH,41,4330.7,5.8,39.66,mu Leo,"0020 mu Leo -- metal rich giant star, fiber 41",
+55701,21,4918,238,AD Leo,retarget_fibers,log,MATCH,238,3841.1,3.0,35.31,AD Leo,"0021 AD Leo -- M3.5eV flare dwarf star, fiber 238",
+55701,22,4918,240,AD Leo,retarget_fibers,log,MATCH,240,2482.1,3.0,35.31,AD Leo,"0022 AD Leo -- M3.5eV flare dwarf star, fiber 240",
+55701,23,4918,235,AD Leo,retarget_fibers,log,MATCH,235,6153.8,2.9,35.31,AD Leo,"0023 AD Leo -- M3.5eV flare dwarf star, fiber 235",
+55701,24,4918,238,HD 107574,retarget_fibers,log,MATCH,238,526.2,1.1,46.0,HD 107574,"0024 HD 107574 -- warm Ba star, fiber 238",
+55701,25,4918,240,HD 107574,retarget_fibers,log,MATCH,240,120.7,1.1,46.0,HD 107574,"0025 HD 107574 -- warm Ba star, fiber 240",
+55701,26,4918,235,HD 107574,retarget_fibers,log,MATCH,235,238.7,1.6,46.0,HD 107574,"0026 HD 107574 -- warm Ba star, fiber 235",
+55701,27,4918,238,HR 4422,retarget_fibers,log,MATCH,238,602.3,5.2,21.0,HR 4422,"0027 HR 4422 -- A2V rapid rotator, vsini=176, fiber 238",
+55701,28,4918,240,HR 4422,retarget_fibers,log,MATCH,240,135.5,5.3,21.0,HR 4422,"0028 HR 4422 -- A2V rapid rotator, vsini=176, fiber 240",
+55701,29,4918,235,HR 4422,retarget_fibers,log,MATCH,235,1251.8,5.7,21.0,HR 4422,"0029 HR 4422 -- A2V rapid rotator, vsini=176, fiber 235",
+55701,30,4918,238,HD 107950,retarget_fibers,log,MATCH,238,19.9,6.3,25.03,HD 107950,"0030 HD 107950 -- 5200K giant star to be paired with HD157910, fiber 238 (note that header card name of this star is wrong in this file), weak spectrum | +0030 Clouds in this direction of the sky",
+55701,31,4918,240,HD 107950,retarget_fibers,log,MATCH,240,467.3,8.3,25.04,HD 132142,"0031 HD 107950 -- 5200K giant star to be paired with HD157910, fiber 240",
+55701,32,4918,235,HD 107950,retarget_fibers,log,MATCH,235,141.8,8.0,25.03,HD 132142,"0032 HD 107950 -- 5200K giant star to be paired with HD157910, fiber 235 (weak spectrum)",
+55701,33,4918,235,HD 107950,retarget_fibers,log,MATCH,235,2842.9,8.0,25.03,HD 132142,"0033 HD 107950 -- 5200K giant star to be paired with HD157910, fiber 235",
+55701,34,4918,238,HD 107950,retarget_fibers,log,MATCH,238,3680.7,8.1,25.04,HD 132142,"0034 HD 107950 -- 5200K giant star to be paired with HD157910, fiber 238",
+55701,35,4918,238,HD 157910,retarget_fibers,log,MATCH,238,9435.7,5.5,57.61,HD 157910,"0035 HD 157910 -- 5200K dwarf star to be paired with HD107950, fiber 238",
+55701,36,4918,240,HD 157910,retarget_fibers,log,MATCH,240,7751.4,5.2,57.61,HD 157910,"0036 HD 157910 -- 5200K dwarf star to be paired with HD107950, fiber 240",
+55701,37,4918,235,HD 157910,retarget_fibers,log,MATCH,235,8897.2,5.6,57.61,HD 157910,"0037 HD 157910 -- 5200K dwarf star to be paired with HD107950, fiber 235, potentially saturated.",
+55701,38,4918,238,HD 132737,retarget_fibers,log,MATCH,238,165.9,2.4,28.6,HD 73388,"0038 HD 132737 -- K0III RV standard -- note header card gives Hipparcos number (HIP 73388), fiber 238",
+55701,39,4918,240,HD 132737,retarget_fibers,log,MATCH,240,150.1,2.4,28.6,HIP 73388,"0039 HD 132737 -- K0III RV standard, fiber 240",
+55701,40,4918,235,HD 132737,retarget_fibers,log,MATCH,235,72.9,3.0,28.6,HIP 73388,"0040 HD 132737 -- K0III RV standard, fiber 235",
+55702,9,4925,208,Arcturus,retarget_fibers,log,MATCH,208,911.6,10.5,65.71,Arcturus,"0009 Arcturus, Fiber 208, ~2500 counts, lots of clouds",
+55702,10,4925,208,Arcturus,retarget_fibers,log,MATCH,208,353.0,10.5,65.71,Arcturus,"0010 Arcturus, Fiber 208",
+55702,11,4925,208,Arcturus,retarget_fibers,log,MATCH,208,269.1,10.5,65.71,Arcturus,"0011 Arcturus, Fiber 208",
+55702,12,4925,196,Arcturus,retarget_fibers,log,MATCH,196,3728.0,10.5,65.71,Arcturus,"0012 Arcturus, Fiber 196",
+55702,13,4925,205,Arcturus,retarget_fibers,log,MATCH,205,651.6,10.5,65.71,Arcturus,"-0013 Refraction Balance set to 1. | 0013 Arcturus, Fiber 205, Low Counts",
+55702,14,4925,205,Arcturus,retarget_fibers,log,MATCH,205,3812.9,10.5,65.71,Arcturus,"0014 Arcturus, Fiber 205",
+55702,15,4925,209,Arcturus,retarget_fibers,log,MATCH,209,6361.8,10.5,65.71,Arcturus,"0015 Arcturus, Fiber 209, clouds beginning to clear. | +0015 Done with Arcturus. Starting Plate 4925 as sky cleared somewhat. Seeing ~2.5-3""",
+55725,22,4912,237,HD 117576,retarget_fibers,log,MATCH,237,70.4,5.9,91.63,"pl 4912,crt 9, HD117576 RV std","-22 set of RV Stds. All taken with clear sky and c-ing ~ 1.5"" | 22 RV std HD117576, plate 4912 cart 9, fiber 237",
+55725,23,4912,218,HD 117576,retarget_fibers,log,MATCH,218,43.2,5.4,91.63,"pl 4912,crt 9, HD117576 RV std","23 RV std HD117576, plate 4912 cart 9, fiber 218",
+55725,24,4912,185,HD 117576,retarget_fibers,log,MATCH,185,352.5,5.1,91.63,"pl 4912,crt 9, HD117576 RV std","24 RV std HD117576, plate 4912 cart 9, fiber 185",
+55725,25,4912,237,HD 119617,retarget_fibers,log,MATCH,237,158.7,9.1,87.82,"pl 4912,crt 9, HD119617 RV std","25 RV std HD119617, plate 4912 cart 9, fiber 237",
+55725,26,4912,218,HD 119617,retarget_fibers,log,MATCH,218,123.9,9.1,87.82,"pl 4912,crt 9, HD119617 RV std","26 RV std HD119617, plate 4912 cart 9, fiber 218",
+55725,27,4912,185,HD 119617,retarget_fibers,log,MATCH,185,78.2,9.1,87.82,"pl 4912,crt 9, HD119617 RV std","27 RV std HD119617, plate 4912 cart 9, fiber 185",
+55725,28,4912,237,HD 120802,retarget_fibers,log,MATCH,237,49.5,7.8,84.85,"pl 4912,crt 9, HD120802 RV std","28 RV std HD120802, plate 4912 cart 9, fiber 237 | +28 looks like star is sgnfcntly off the fiber. Low signal.",
+55725,29,4912,218,HD 120802,retarget_fibers,log,MATCH,218,30.2,7.8,84.85,"pl 4912,crt 9, HD120802 RV std","29 RV std HD120802, plate 4912 cart 9, fiber 218",
+55725,30,4912,185,HD 120802,retarget_fibers,log,MATCH,185,1111.2,9.4,84.85,"pl 4912,crt 9, HD120802 RV std","-30 pointing adjusted a bit... | 30 RV std HD120802, plate 4912 cart 9, fiber 185 | +30 and this one gets good signal",
+55725,31,4912,237,HD 123914,retarget_fibers,log,MATCH,237,20.1,4.7,83.41,"pl 4912,crt 9, HD123914 RV std","31 RV std HD123914, plate 4912 cart 9, fiber 237 | +31 Weak signal. It was fainter star, and also it was offset a bit",
+55725,32,4912,218,HD 123914,retarget_fibers,log,MATCH,218,58.5,4.6,83.41,"pl 4912,crt 9, HD123914 RV std","32 RV std HD123914, plate 4912 cart 9, fiber 218 | +32 a little better, but not as good as expected.",
+55725,33,4912,185,HD 123914,retarget_fibers,log,MATCH,185,233.0,4.6,83.41,"pl 4912,crt 9, HD123914 RV std","33 RV std HD123914, plate 4912 cart 9, fiber 185 | +33 this one was better.",
+55725,34,4912,237,HD 132737,retarget_fibers,log,MATCH,237,1708.5,7.3,70.05,"pl 4912,crt 9, HD132737 RV std","34 RV std HD132737, plate 4912 cart 9, fiber 237 | +34 good signal",
+55725,35,4912,218,HD 132737,retarget_fibers,log,MATCH,218,370.2,7.3,70.05,"pl 4912,crt 9, HD132737 RV std","35 RV std HD132737, plate 4912 cart 9, fiber 218",
+55725,36,4912,185,HD 132737,retarget_fibers,log,MATCH,185,2629.5,7.1,70.05,"pl 4912,crt 9, HD132737 RV std","36 RV std HD132737, plate 4912 cart 9, fiber 185",
+55726,40,4823,162,HD 130322,not_science,log,NO_DETECTION,162,9.3,7.1,30.62,RV std HD130322 fibre 162,"40 RV std HD130322 fiber 162, almost no flux due to clouds (S/N~3)?",data check: no trace stands out (no star light in any fiber)
+55727,28,-1,162,HD 130322,skip,log,MATCH,162,638.3,nan,nan,"RV std HD130322, fiber 162","28 RV std HD130322, fiber 162. Flux peak ~ 3000 | +28 gcamera actor died, we took time to make guider alive again","raw header has no PLATEID, so almanac builds no fiber table for this exposure"
+55727,29,4823,255,HD 130322,retarget_fibers,log,MATCH,255,1109.9,8.1,30.62,"RV std HD130322, fiber 255","-29 guider fixed, we continue. The sky is clear all the time. | 29 RV std HD130322, fiber 255 , Flux peak ~ 5000",
+55727,30,4823,210,HD 130322,retarget_fibers,log,MATCH,210,108.1,8.1,30.62,"RV std HD130322, fiber 210","30 RV std HD130322, fiber 210 , Flux peak ~450",
+55729,18,4936,185,HD 132142,retarget_fibers,log,MATCH,185,190.0,9.7,59.71,"HD132142 5200K dwarf star, fiber 185",-18 HD 132142 5200K dwarf star spectral standard (half of d/g test pair with HD107950 taken last month). | 18 HD 132142 with 3 SUTR test. Fiber 185. 500 ADU at peak.,
+55729,19,4936,185,HD 132142,retarget_fibers,log,MATCH,185,1960.2,9.7,59.71,"HD132142 5200K dwarf star, fiber 185","19 HD 132142 with 20 SUTR. Fiber 185. 10,000 ADU at peak.",
+55729,20,4936,189,HD 132142,retarget_fibers,log,MATCH,189,2899.1,9.7,59.71,"HD132142 5200K dwarf star, fiber 189","20 HD 132142 with 20 SUTR. Fiber 189. 10,000 ADU at peak.",
+55729,21,4936,194,HD 132142,retarget_fibers,log,MATCH,194,2308.1,9.7,59.71,"HD132142 5200K dwarf star, fiber 194",21 HD 132142 with 20 SUTR. Fiber 194.,
+55729,27,4819,52,Arcturus,retarget_fibers,log,MATCH,52,4636.5,10.4,36.35,"Arcturus, cart 7, plate 4819, fiber 52","27 Arcturus, fiber 52 in Plate 4819. Test 3 SUTR. 15,000 ADU peak.",
+55729,28,4819,58,Arcturus,retarget_fibers,log,MATCH,58,8704.1,10.4,36.35,"Arcturus, cart 7, plate 4819, fiber 58","28 Arcturus, fiber 58 in Plate 4819. 3 SUTR. 15,000 ADU peak.",
+55729,29,4819,60,Arcturus,retarget_fibers,log,MATCH,60,2633.7,10.4,36.35,"Arcturus, cart 7, plate 4819, fiber 60","29 Arcturus, fiber 60 in Plate 4819. 3 SUTR. 6,500 ADU peak.",
+55729,30,4819,52,HD 156074,retarget_fibers,log,MATCH,52,80.8,8.9,8.32,"HD 156074 C3 carbon star, fiber 52","30 HD 156074, C3 carbon star w/strong metals. 3 SUTR test. 175 ADU. Fiber 52.",
+55729,31,4819,52,HD 156074,retarget_fibers,log,MATCH,52,411.2,8.9,8.32,"HD 156074 C3 carbon star, fiber 52","31 HD 156074, C3 carbon star w/strong metals. 15 SUTR. 1800 ADU. Fiber 52.",
+55729,32,4819,59,HD 156074,retarget_fibers,log,MATCH,59,212.1,8.9,8.32,"HD 156074 C3 carbon star, fiber 59","32 HD 156074, C3 carbon star w/strong metals. 25 SUTR. 900 ADU. Fiber 59.",
+55729,33,4819,53,HD 156074,retarget_fibers,log,MATCH,53,124.1,8.9,8.32,"HD 156074 C3 carbon star, fiber 53","33 HD 156074, C3 carbon star w/strong metals. 30 SUTR. 800 ADU. Fiber 53.",
+55729,34,4819,53,HD 156074,retarget_fibers,log,MATCH,53,261.0,8.9,8.32,"HD 156074 C3 carbon star, fiber 53","34 HD 156074, C3 carbon star w/strong metals. 30 SUTR. 1300 ADU. Fiber 53.",
+55729,35,4819,51,HD 154653,retarget_fibers,log,MATCH,51,964.2,6.3,21.92,"HD 154653 K0 III RV std., fiber 51","35 HD 154653, K0 III RV std. Fiber 51. 3 SUTR test. 2500 ADU at peak.",
+55729,36,4819,58,HD 154653,retarget_fibers,log,MATCH,58,1605.1,6.3,21.92,"HD 154653 K0 III RV std., fiber 58","36 HD 154653, K0 III RV std. Fiber 58. 5 SUTR. 4000 ADU at peak.",
+55729,37,4819,60,HD 154653,retarget_fibers,log,MATCH,60,75.6,6.3,21.92,"HD 154653 K0 III RV std., fiber 60","37 HD 154653, K0 III RV std. Fiber 60. 5 SUTR. 500 ADU at peak.",
+55729,38,4819,60,HD 154653,retarget_fibers,log,MATCH,60,35.4,6.3,21.92,"HD 154653 K0 III RV std., fiber 60","38 HD 154653, K0 III RV std. Fiber 60. 5 SUTR. 250 ADU at peak.",
+55729,39,4819,52,HD 156681,retarget_fibers,log,MATCH,52,9078.1,5.5,26.91,"HD 156681 K4 II-III RV std., fiber 52","39 HD 156681, K4 II-III RV std. Fiber 52. 5 SUTR. 40,000 ADU at peak.",
+55729,40,4819,59,HD 156681,retarget_fibers,log,MATCH,59,2511.5,5.5,26.91,"HD 156681 K4 II-III RV std., fiber 59","40 HD 156681, K4 II-III RV std. Fiber 59. 3 SUTR. 3000 ADU at peak.",
+55729,41,4819,53,HD 156681,retarget_fibers,log,MATCH,53,14411.3,5.5,26.91,"HD 156681 K4 II-III RV std., fiber 53","41 HD 156681, K4 II-III RV std. Fiber 53. 3 SUTR. 25,000 ADU at peak.",
+55729,42,4819,51,HR 6175,retarget_fibers,log,MATCH,51,502.0,9.2,47.04,"HR 6175, O9.5Vn rapid rotator, fiber 51","42 HR 6175, O9.5Vn vsini=379. Fiber 51. 3 SUTR. 1200 ADU at peak.",
+55729,43,4819,58,HR 6175,retarget_fibers,log,MATCH,58,2926.1,9.2,47.04,"HR 6175, O9.5Vn rapid rotator, fiber 58","43 HR 6175, O9.5Vn vsini=379. Fiber 58. 10 SUTR. 15,000 ADU at peak.",
+55729,44,4819,60,HR 6175,retarget_fibers,log,MATCH,60,271.7,9.2,47.04,"HR 6175, O9.5Vn rapid rotator, fiber 60","44 HR 6175, O9.5Vn vsini=379. Fiber 60. 10 SUTR. 1300 ADU at peak.",
+55729,45,4819,60,HR 6175,not_science,log,MATCH_BUT_SECOND_FIBER,60,13.0,9.2,47.04,"HR 6175, O9.5Vn rapid rotator, fiber 60","45 HR 6175, O9.5Vn vsini=379. Fiber 60. 10 SUTR. Hardly anything.",data check: the stated fiber is brightest but another fiber has a comparable signal
+55729,46,4819,60,HR 6175,retarget_fibers,log,MATCH,60,214.3,9.2,47.04,"HR 6175, O9.5Vn rapid rotator, fiber 60","46 HR 6175, O9.5Vn vsini=379. Fiber 60. 20 SUTR. 1750 ADU at peak.",
+55729,47,4819,51,HR 6175,retarget_fibers,log,MATCH,51,2731.4,9.2,47.04,"HR 6175, O9.5Vn rapid rotator, fiber 51","47 HR 6175, O9.5Vn vsini=379. Fiber 51. 30 SUTR. 35,000 ADU at peak.",
+55729,48,4819,52,HD 146051,retarget_fibers,log,MATCH,52,12170.6,6.1,40.67,"HD 146051, M0.5 III RV std, fiber 52","48 HD 146051, M0.5 III RV std, Fiber 52. 3 SUTR. 28,000 ADU at peak.",
+55729,49,4819,59,HD 146051,retarget_fibers,log,MATCH,59,20.5,6.1,40.67,"HD 146051, M0.5 III RV std, fiber 59","49 HD 146051, M0.5 III RV std, Fiber 59. 3 SUTR. nothing",
+55729,50,4819,59,HD 146051,retarget_fibers,log,MATCH,59,4132.9,6.1,40.67,"HD 146051, M0.5 III RV std, fiber 59","50 HD 146051, M0.5 III RV std, Fiber 59. 3 SUTR. 7,000 ADU at peak.",
+55729,51,4819,53,HD 146051,retarget_fibers,log,MATCH,53,9505.1,6.1,40.67,"HD 146051, M0.5 III RV std, fiber 53","51 HD 146051, M0.5 III RV std, Fiber 53. 3 SUTR. 25,000 ADU at peak.",
+55729,52,4819,51,HD 227049,retarget_fibers,log,MATCH,51,20.7,10.9,39.16,"HD 227049, K2 III RV std, fiber 51","52 HD 227049, K2 III RV std, Fiber 51. 3 SUTR. Hardly any flux.",
+55729,53,4819,51,HD 227049,retarget_fibers,log,MATCH,51,639.4,10.9,39.16,"HD 227049, K2 III RV std, fiber 51","53 HD 227049, K2 III RV std, Fiber 51. 30 SUTR. 900 counts, but several fibers lit up?",
+55729,54,4819,51,HD 227049,retarget_fibers,log,MATCH,51,632.1,10.9,39.16,"HD 227049, K2 III RV std, fiber 51","54 HD 227049, K2 III RV std, Fiber 51. 50 SUTR. 5000 counts.",
+55729,55,4819,58,HD 227049,retarget_fibers,log,MATCH,58,470.3,10.9,39.16,"HD 227049, K2 III RV std, fiber 58","55 HD 227049, K2 III RV std, Fiber 58. 50 SUTR. 3300 counts.",
+55729,56,4819,60,HD 227049,retarget_fibers,log,MATCH,60,5983.9,9.1,39.16,"HD 227049, K2 III RV std, fiber 60","56 HD 227049, K2 III RV std, Fiber 60. 50 SUTR. 33,000 counts. Saturated?",
+55729,57,4819,60,HD 227049,retarget_fibers,log,MATCH,60,558.9,9.1,39.16,"HD 227049, K2 III RV std, fiber 60","57 HD 227049, K2 III RV std, Fiber 60. 10 SUTR. 3,000 counts.",
+55729,58,4819,52,HD 175305,retarget_fibers,log,MATCH,52,568.2,17.5,41.03,"HD175035,  metal-poor r+s proc., fiber 52","58 HD 175035, metal-poor r+s process star, Fiber 52. 10 SUTR. 3000 counts.",
+55729,59,4819,59,HD 175305,retarget_fibers,log,MATCH,59,360.9,17.5,41.03,"HD175035,  metal-poor r+s proc., fiber 59","59 HD 175035, metal-poor r+s process star, Fiber 59. 10 SUTR. 1500 counts.",
+55729,60,4819,59,HD 175305,retarget_fibers,log,MATCH,59,384.9,17.5,41.03,"HD175035,  metal-poor r+s proc., fiber 59","60 HD 175035, metal-poor r+s process star, Fiber 59. 10 SUTR. 1500 counts.",
+55729,61,4819,53,HD 175305,retarget_fibers,log,MATCH,53,615.9,17.5,41.03,"HD175035,  metal-poor r+s proc., fiber 53","61 HD 175035, metal-poor r+s process star, Fiber 53. 20 SUTR. 3300 counts.",
+55729,62,4819,218,HD 221170,retarget_fibers,log,MATCH,218,6056.2,10.3,80.91,"HD221170,  metal-poor r-proc., fiber 218","62 HD 221170, metal-poor r-process star, Fiber 218. 20 SUTR. 25,000 counts.",
+55729,63,4819,222,HD 221170,retarget_fibers,log,MATCH,222,2632.0,10.3,80.91,"HD221170,  metal-poor r-proc., fiber 222","63 HD 221170, metal-poor r-process star, Fiber 222. 10 SUTR. 12,000 counts.",
+55729,64,4819,239,HD 221170,retarget_fibers,log,MATCH,239,1305.0,10.3,80.91,"HD221170,  metal-poor r-proc., fiber 239","64 HD 221170, metal-poor r-process star, Fiber 239. 10 SUTR. 5,000 counts.",
+55729,65,4819,219,GJ 699,retarget_fibers,log,MATCH,219,26.5,11.7,36.21,"GJ699,  M4V dwarf, fiber 219","65 GJ 699, M4V dwarf to compare to HR 7442, Fiber 219. 3 SUTR. CLOUD!!",
+55729,66,4819,219,GJ 699,retarget_fibers,log,MATCH,219,447.8,11.7,36.21,"GJ699,  M4V dwarf, fiber 219","66 GJ 699, M4V dwarf to compare to HR 7442, Fiber 219. 30 SUTR. 5000 ADU. Spectrum looks too ""calm"" for a late type star. Star has significant proper motion, but after hand correction for it, this is the star that came in and it looked of proper magnitude.",
+55729,67,4819,235,GJ 699,retarget_fibers,log,MATCH,235,2041.5,11.7,36.21,"GJ699,  M4V dwarf, fiber 235","67 GJ 699, M4V dwarf to compare to HR 7442, Fiber 235. 30 SUTR. 18,000 ADU.",
+55729,68,4819,240,GJ 699,retarget_fibers,log,MATCH,240,4873.6,11.7,36.21,"GJ699,  M4V dwarf, fiber 240","68 GJ 699, M4V dwarf to compare to HR 7442, Fiber 240. 30 SUTR. Saturated.",
+55729,69,4819,240,GJ 699,retarget_fibers,log,MATCH,240,480.1,11.7,36.21,"GJ699,  M4V dwarf, fiber 240","69 GJ 699, M4V dwarf to compare to HR 7442, Fiber 240. 5 SUTR. 3,000 ADU.",
+55729,70,4819,218,HR 7442,retarget_fibers,log,MATCH,218,8953.9,15.5,33.44,"HR7442,  M4.5IIIa giant, fiber 218","70 HR7442, M4.5IIIa giant to compare to GJ 699, Fiber 218. 3 SUTR. 20,000 ADU.",
+55729,71,-1,222,HR 7442,skip,log,MATCH,222,10779.4,nan,nan,"HR7442,  M4.5IIIa giant, fiber 222","71 HR7442, M4.5IIIa giant to compare to GJ 699, Fiber 222. 3 SUTR. 20,000 ADU. Two fibers lit?","raw header has no PLATEID, so almanac builds no fiber table for this exposure"
+55729,72,4819,239,HR 7442,retarget_fibers,log,MATCH,239,13946.3,15.5,33.44,"HR7442, fiber 239","72 HR7442, M4.5IIIa giant to compare to GJ 699, Fiber 239. 3 SUTR. 25,000 ADU. Two fibers lit?",
+55730,46,4928,211,eta Boo,retarget_fibers,log,MATCH,211,1420.8,4.7,72.99,"eta Boo, G IV asteroseismic target, fiber 211","-46 Plate 4928, bulge field 004+00, Cart 3, 1st visit to this plate. | -46 Give up due to clouds. Attempt some standard stars with this plate. | 46 eta Boo, G subgiant with (non-Kepler) asteroseimic data. 5 SUTR test. 5500 ADU. Fiber 211.",
+55730,47,4928,216,eta Boo,retarget_fibers,log,MATCH,216,5195.4,4.7,72.99,"eta Boo, G IV asteroseismic target, fiber 216","47 eta Boo, G subgiant with (non-Kepler) asteroseimic data. 5 SUTR. 15,000 ADU. Fiber 216.",
+55730,48,4928,139,eta Boo,retarget_fibers,log,MATCH,139,5536.3,4.7,72.99,"eta Boo, G IV asteroseismic target, fiber 139","48 eta Boo, G subgiant with (non-Kepler) asteroseimic data. 5 SUTR. 16,000 ADU. Fber 139.",
+55730,49,4928,193,alpha Her,retarget_fibers,log,MATCH,193,3891.1,2.0,41.06,"alpha Her, M5 II var, fiber 193","49 alpha Her, M5IIvar. Fiber 193. 25 SUTR. 25,000 ADU.",
+55730,50,4928,247,alpha Her,retarget_fibers,log,MATCH,247,258.2,2.0,41.06,"alpha Her, M5 II var, fiber 247","50 alpha Her, M5IIvar. Fiber 247. 10 SUTR. 1,200 ADU.",
+55730,51,4928,247,alpha Her,retarget_fibers,log,MATCH,247,531.8,2.0,41.06,"alpha Her, M5 II var, fiber 247","51 alpha Her, M5IIvar. MISTAKE -- TELESCOPE MOVED OFF FIBER. Put back onto Fiber 247 at read 6. 3,000 ADU.",
+55730,52,4928,140,alpha Her,retarget_fibers,log,MATCH,140,4152.2,2.0,41.06,"alpha Her, M5 II var, fiber 140","52 alpha Her, M5IIvar. Fiber 140. 20 SUTR. 30,000 ADU.",
+55730,53,4928,140,alpha Her,retarget_fibers,log,MATCH,140,1391.5,2.0,41.06,"alpha Her, M5 II var, fiber 140","53 alpha Her, M5IIvar. Fiber 140. 8 SUTR. 7,000 ADU.",
+55731,15,4813,151,HD 88609,retarget_fibers,log,MATCH,151,60.9,1.4,45.91,"HD 88609 metal-poor G5III, Fib. 151","-15 Give up and go to standard stars. | 15 HD 88609, metal-poor G5III star. Fiber 151. 10 SUTR. No signal.",
+55731,16,4813,151,HD 88609,retarget_fibers,log,MATCH,151,113.0,0.9,45.91,"HD 88609 metal-poor G5III, Fib. 151","16 HD 88609, metal-poor G5III star. Fiber 151. 10 SUTR. 500 counts.",
+55731,17,4813,151,HD 88609,not_science,log,MATCH_BUT_SECOND_FIBER,151,18.7,0.9,45.91,"HD 88609 metal-poor G5III, Fib. 151","17 HD 88609, metal-poor G5III star. Fiber 151. 30 SUTR. No signal.",data check: the stated fiber is brightest but another fiber has a comparable signal
+55754,15,4941,190,beta Cyg,not_science,log,NO_DETECTION,136,2.3,0.2,32.04,beta Cyg fiber 190,"-15 we got a little chance to get standards through clouds, cart 9 plate 4941 | 15 beta Cyg in fiber 190 almost no signal",data check: no trace stands out (no star light in any fiber)
+55754,16,4941,190,beta Cyg,retarget_fibers,log,MATCH,190,3261.0,0.2,32.04,beta Cyg fiber 190,16 beta Cyg in fiber 190 signal ~ 12000,
+55754,17,4941,232,beta Cyg,not_science,log,NO_DETECTION,48,3.3,0.2,32.04,beta Cyg fiber 232,17 beta Cyg in fiber 232 no signal,data check: no trace stands out (no star light in any fiber)
+55754,18,4941,232,beta Cyg,not_science,log,NO_DETECTION,216,2.4,0.2,32.04,beta Cyg fiber 232,18 beta Cyg in fiber 232 no signal,data check: no trace stands out (no star light in any fiber)
+55754,19,4941,232,beta Cyg,retarget_fibers,log,MATCH,232,2967.4,0.2,32.04,beta Cyg fiber 232,19 beta Cyg in fiber 232 signal 10000,
+55754,20,4941,240,beta Cyg,not_science,log,NO_DETECTION,240,6.7,0.2,32.04,beta Cyg fiber 232,20 beta Cyg in fiber 240 no signal (wrongly called 232),data check: no trace stands out (no star light in any fiber)
+55754,21,4941,240,beta Cyg,not_science,log,NO_DETECTION,13,2.8,0.2,32.04,beta Cyg fiber 232,21 beta Cyg in fiber 240 no signal (wrongly called 232),data check: no trace stands out (no star light in any fiber)
+55754,22,4941,240,beta Cyg,retarget_fibers,log,MATCH,240,14977.5,0.2,32.04,beta Cyg fiber 232,22 beta Cyg in fiber 240 signal >45000,
+55754,23,4941,240,beta Cyg,retarget_fibers,log,MATCH,240,13855.0,0.2,32.04,beta Cyg fiber 240,23 beta Cyg in fiber 240 signal 22000,
+55754,24,4941,190,HD 208527,retarget_fibers,log,MATCH,190,223.4,0.2,11.03,HD208527 fiber 190,"-24 this is a real hunt, since the clouds are clumpy, we often lost *s in g-fibers | 24 HD208527 , fiber 190 signal 350",
+55754,25,4941,190,HD 208527,retarget_fibers,log,MATCH,190,656.3,0.2,11.03,HD208527 fiber 190,"25 HD208527 , fiber 190 signal 3000",
+55754,26,4941,232,HD 208527,retarget_fibers,log,MATCH,232,1097.7,0.2,11.03,HD208527 fiber 190,"26 HD208527 , fiber 232 signal 1500",
+55754,27,4941,240,HD 208527,not_science,log,NO_DETECTION,240,7.0,0.2,11.03,HD208527 fiber 240,"27 HD208527 , fiber 240 almost signal - clouds",data check: no trace stands out (no star light in any fiber)
+55754,28,4941,240,HD 208527,retarget_fibers,log,OTHER_FIBER(240),240,71.1,0.2,11.03,HD208527 fiber 240,"28 HD208527 , fiber 232 signal 240",log says fiber 232; raw-header OBSCMNT ('HD208527 fiber 240') and the data check say fiber 240: fiber 240 used
+55757,10,4819,203,30 Her,not_science,log,NO_DETECTION,66,3.1,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=203","10 cart. 1, 4819, ASDAF, 30 Her, fiber 203, the sky is very cloudy, no signal",data check: no trace stands out (no star light in any fiber)
+55757,11,4819,203,30 Her,not_science,log-inherit,NO_DETECTION,203,3.1,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=203","11 same, same fiber, no signal either",data check: no trace stands out (no star light in any fiber)
+55757,12,4819,203,30 Her,retarget_fibers,log-inherit,MATCH,203,2570.1,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=203","12 same, same fiber, signal 16000 (gap in clouds?)",
+55757,13,4819,203,30 Her,retarget_fibers,log-inherit,MATCH,203,2301.7,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=203","13 same , same fiber, signal 7600, sky is cloudy",
+55757,14,4819,241,30 Her,retarget_fibers,log,MATCH,241,157.1,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=241","14 30 Her, fiber 241, signal 400",
+55757,15,4819,199,30 Her,retarget_fibers,log,MATCH,199,166.7,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=199","15 30 Her, fiber 199, signal 700",
+55757,16,4819,199,30 Her,retarget_fibers,log,MATCH,199,25.3,3.3,5.99,"cart. 1, 4819, ASDAF, 30 Her, probe=199","16 30 Her, fiber 199, signal 300, sky is getting worse, 30 Her is not done yet! | +16 We tried Antares after that, but it is not seen in guider",
+55757,17,4819,203,Antares,not_science,log,NO_DETECTION,84,2.0,20.0,62.96,"cart. 1, 4819, ASDAF, Antares, probe=203","17 cart. 1, 4819, ASDAF, Antares, fiber 203, low counts",data check: no trace stands out (no star light in any fiber)
+55757,18,4819,203,Antares,retarget_fibers,header,MATCH,203,3734.8,20.0,62.96,"cart. 1, 4819, ASDAF, Antares, probe=203","18 Antares, too high signal, ~ 50000",
+55757,19,4819,203,Antares,not_science,header,NO_DETECTION,201,3.7,20.0,62.96,"cart. 1, 4819, ASDAF, Antares, probe=203","19 Antares, signal = 60 only",data check: no trace stands out (no star light in any fiber)
+55757,20,4819,203,Antares,retarget_fibers,header,MATCH,203,19.2,20.0,62.96,"cart. 1, 4819, ASDAF, Antares, probe=203","20 Antares, no signal",
+55757,21,4819,203,Antares,retarget_fibers,header,MATCH,203,11.6,20.0,62.96,"cart. 1, 4819, ASDAF, Antares, probe=203","21 Antares, no signal, still very cloudy, low altitude",
+55757,22,4819,203,HD 177724,retarget_fibers,log,MATCH,203,30.8,6.3,39.2,"cart. 1, 4819, ASDAF, Antares, probe=203","22 (fits comment i wrong): telluric standard HD177724, fiber 203 signal 150",
+55757,23,4819,203,HD 177724,retarget_fibers,log,MATCH,203,168.2,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=203","23 HD177724, fiber 203 signal 2000",
+55757,24,4819,241,HD 177724,retarget_fibers,log,MATCH,241,1008.8,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=241","24 HD177724, fiber 241. Stopped after 14th read. Header still shows 38. Signal 8000",
+55757,25,4819,199,HD 177724,retarget_fibers,log,MATCH,199,246.9,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=199","25 HD177724, fiber 199 signal 5000, exposed all, not stopped",
+55757,26,4819,203,HD 177724,not_science,log,NO_DETECTION,203,8.2,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=203","26 HD177724, fiber 203 signal 400",data check: no trace stands out (no star light in any fiber)
+55757,27,4819,203,HD 177724,retarget_fibers,log,MATCH,203,46.5,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=203","27 HD177724, fiber 203 signal 1700",
+55757,28,4819,241,HD 177724,not_science,log,NO_DETECTION,241,4.3,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=241","28 HD177724, fiber 241 low signal",data check: no trace stands out (no star light in any fiber)
+55757,29,4819,241,HD 177724,not_science,log,NO_DETECTION,241,2.7,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=241","29 HD177724, fiber 241 low signal",data check: no trace stands out (no star light in any fiber)
+55757,30,4819,241,HD 177724,not_science,log,MATCH_BUT_SECOND_FIBER,241,16.1,6.3,39.2,"cart. 1, 4819, ASDAF, HD177724, probe=241","30 HD177724, fiber 241 low signal",data check: the stated fiber is brightest but another fiber has a comparable signal
+55757,31,4819,241,HD 177724,retarget_fibers,log,MATCH,241,2376.5,7.5,39.19,"cart. 1, 4819, ASDAF, HD177724, probe=241","31 HD177724, fiber 241 signal 8000",
+55757,32,4819,199,HD 177724,not_science,log,OTHER_FIBER(259),259,826.5,7.5,39.19,"cart. 1, 4819, ASDAF, HD177724, probe=199","32 HD177724, fiber 199 signal 2000","data check: the brightest trace is fiber 259, the stated fiber 199 is only second (ratio 0.401)"
+55757,33,4819,199,HD 177724,not_science,log,OTHER_FIBER(259),259,918.6,7.5,39.19,"cart. 1, 4819, ASDAF, HD177724, probe=199","33 HD177724, fiber 199 signal 2300","data check: the brightest trace is fiber 259, the stated fiber 199 is only second (ratio 0.25)"
+55757,34,4819,199,HD 177724,not_science,log,OTHER_FIBER(259),259,222.3,7.5,39.19,"cart. 1, 4819, ASDAF, HD177724, probe=199","34 HD177724, fiber 199 signal 2500","data check: the brightest trace is fiber 259, the stated fiber 199 is only second (ratio 0.452)"
+55757,35,4819,203,HD 177724,retarget_fibers,log,MATCH,203,371.0,9.0,39.19,"cart. 1, 4819, ASDAF, HD177724, probe=203","35 HD177724, fiber 203 signal 7500",
+55757,36,4819,199,HD 177724,retarget_fibers,log,MATCH,199,175.6,10.0,39.19,"cart. 1, 4819, ASDAF, HD177724, probe=199","36 HD177724, fiber 199 signal 3900 | +36 sky is clearing up, switching to survey plates",
+55759,58,5092,195,beta Peg,retarget_fibers,log,MATCH,195,3857.1,2.8,36.07,"Cart 7, plate 5092, APG_M2","58 BetaPeg Fiber 195. Hit an open spot in clouds, blasted fiber. | +58 Switching to another ASDAF target, betapeg is just too bright.",
+55759,59,5092,195,HD 196944,not_science,log,MATCH,195,7837.9,186236.3,46.27,"Cart 7, plate 5092, APG_M2","59 HD196944 Fiber 195, 20000 Counts.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,60,5092,230,HD 196944,not_science,log,MATCH,230,1493.6,186238.1,46.27,"Cart 7, plate 5092, APG_M2","60 HD196944 Fiber 230, 40 counts due to clouds.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,61,5092,230,HD 196944,not_science,log,MATCH,230,391.4,186238.1,46.27,"Cart 7, plate 5092, APG_M2","61 HD196944 Fiber 230, 500 counts.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,62,5092,230,HD 196944,not_science,log,MATCH,230,68.7,186238.1,46.27,"Cart 7, plate 5092, APG_M2","62 HD196944 Fiber 230, 100 counts.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,63,5092,230,HD 196944,not_science,log,MATCH,230,2512.4,186239.9,46.27,"Cart 7, plate 5092, APG_M2","63 HD196944 Fiber 230, 5500 counts.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,64,5092,234,HD 196944,not_science,log,NO_DETECTION,9,2.7,186239.8,46.27,"Cart 7, plate 5092, APG_M2","64 HD196944 Fiber 234, Low counts","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,65,5092,234,HD 196944,not_science,log,MATCH,234,5923.5,186239.8,46.27,"Cart 7, plate 5092, APG_M2","65 HD196944 Fiber 234, Hit a gap. 26,000 counts.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,66,5092,188,HD 196944,not_science,log,NO_DETECTION,94,2.9,186239.8,46.27,"Cart 7, plate 5092, APG_M2",66 HD196944 Fiber 188,"log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,67,5092,188,HD 196944,not_science,log,MATCH,188,14.5,186239.8,46.27,"Cart 7, plate 5092, APG_M2","67 HD196944 Fiber 188, counts in the 10s.","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,68,5092,188,HD 196944,not_science,log,MATCH,188,1712.3,186239.8,46.27,"Cart 7, plate 5092, APG_M2","68 HD196944 Fiber 188, 3000 counts","log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 and 15 arcsec from V2141 Cyg: the star in the fiber is not established"
+55759,69,5092,230,HD 9138,retarget_fibers,log,MATCH,230,6539.9,1.5,59.45,"Cart 7, plate 5092, APG_M2","69 HD9138 Fiber 230, counts 5000",
+55759,70,5092,234,HD 9138,retarget_fibers,log,MATCH,234,6102.6,1.5,59.45,"Cart 7, plate 5092, APG_M2","70 HD9138 Fiber 234, 18000 counts",
+55759,71,5092,188,HD 9138,retarget_fibers,log,MATCH,188,12880.2,1.5,59.45,"Cart 7, plate 5092, APG_M2","71 HD9138 FIber 188, clouds clearing, 24000 counts. | +71 10 degree twilight, no time to switch to another plate. Going to try to observe this plate more but well off drilled HA.",
+55810,15,5219,158,BD+17 3248,retarget_fibers,header,MATCH,158,24.3,20.8,52.43,ASDAF BD+17_3248 fib 158,,
+55810,16,5219,158,BD+17 3248,retarget_fibers,header,MATCH,158,19.4,20.8,52.43,ASDAF BD+17_3248 fib 158,,
+55810,17,5219,158,BD+17 3248,retarget_fibers,header,MATCH,158,19.3,20.8,52.43,ASDAF BD+17_3248 fib 158,,
+55810,18,5219,158,BD+17 3248,not_science,header,NO_DETECTION,126,3.4,20.8,52.43,ASDAF BD+17_3248 fib 158,,data check: no trace stands out (no star light in any fiber)
+55810,19,5219,165,BD+17 3248,retarget_fibers,header,MATCH,165,222.1,18.5,52.42,ASDAF BD+17_3248 fib 165,,
+55810,20,5219,165,BD+17 3248,retarget_fibers,header,MATCH,165,194.0,18.5,52.42,ASDAF BD+17_3248 fib 165,,
+55810,21,5219,161,BD+17 3248,retarget_fibers,header,MATCH,161,514.2,18.5,52.42,ASDAF BD+17_3248 fib 161,,
+55810,22,5219,161,BD+17 3248,retarget_fibers,header,MATCH,161,407.9,18.5,52.42,ASDAF BD+17_3248 fib 161,,
+55810,23,5219,161,BD+17 3248,retarget_fibers,header,MATCH,161,453.7,18.5,52.42,ASDAF BD+17_3248 fib 161,,
+55810,24,5219,161,BD+17 3248,retarget_fibers,header,MATCH,161,377.7,18.5,52.42,ASDAF BD+17_3248 fib 161,,
+55810,44,5219,158,HD 156681,retarget_fibers,log,MATCH,158,1116.7,19.1,47.47,ASDAF HD156681 fib 158,"44 ASDAF HD156681 fib 158, signal 5700",
+55810,45,5219,158,HD 156681,retarget_fibers,log,OTHER_FIBER(158),158,706.0,19.1,47.47,ASDAF HD156681 fib 158,"45 ASDAF HD156681 fib 161, signal ~ 2500",log says fiber 161; raw-header OBSCMNT ('ASDAF HD156681 fib 158') and the data check say fiber 158: fiber 158 used
+55810,46,5219,161,HD 156681,retarget_fibers,log-inherit,MATCH,161,31.5,19.1,47.47,ASDAF HD156681 fib 161,46 signal 200,
+55810,47,5219,161,HD 156681,retarget_fibers,log-inherit,MATCH,161,327.9,19.1,47.47,ASDAF HD156681 fib 161,47 signal 2500,
+55810,48,5219,161,HD 156681,retarget_fibers,log-inherit,MATCH,161,360.2,19.1,47.47,ASDAF HD156681 fib 161,48 signal 2800,
+55810,49,5219,161,HD 156681,retarget_fibers,log-inherit,MATCH,161,28.8,19.1,47.47,ASDAF HD156681 fib 161,49 signal 200,
+55810,50,5219,165,HD 156681,not_science,log,MATCH_BUT_SECOND_FIBER,165,159.0,19.1,47.47,ASDAF HD156681 fib 165,"50 moved to fibed 165, signal 1000",data check: the stated fiber is brightest but another fiber has a comparable signal
+55810,51,5219,165,HD 156681,retarget_fibers,log-inherit,MATCH,165,11.9,19.1,47.47,ASDAF HD156681 fib 165,51 signal 100,
+55810,52,5219,165,HD 156681,retarget_fibers,log-inherit,MATCH,165,709.6,19.1,47.47,ASDAF HD156681 fib 165,52 signal 5500,
+55810,53,5219,165,HD 156681,retarget_fibers,log-inherit,MATCH,165,149.4,19.1,47.47,ASDAF HD156681 fib 165,53 signal 1200,
+55810,57,5219,158,HD 195647,retarget_fibers,log,MATCH,158,39.5,17.7,74.86,ASDAF HD195647 fib. 158,"57 ASDAF HD195647 fib. 158, signal 230",
+55810,58,5219,158,HD 195647,retarget_fibers,log-inherit,MATCH,158,183.0,17.7,74.86,ASDAF HD195647 fib. 158,58 signal 230 again,
+55810,59,5219,158,HD 195647,retarget_fibers,log-inherit,MATCH,158,595.9,17.7,74.86,ASDAF HD195647 fib. 158,59 signal 1900,
+55810,60,5219,158,HD 195647,retarget_fibers,log-inherit,MATCH,158,663.7,17.7,74.86,ASDAF HD195647 fib. 158,60 signal 2500,
+55810,61,5219,165,HD 195647,retarget_fibers,header,MATCH,165,1126.1,17.7,74.86,ASDAF HD195647 fib. 165,61 signal 6000,
+55810,62,5219,165,HD 195647,retarget_fibers,header,MATCH,165,2383.2,17.7,74.86,ASDAF HD195647 fib. 165,62 signal 18000,
+55810,63,5219,161,HD 195647,retarget_fibers,header,MATCH,161,982.9,17.7,74.86,ASDAF HD195647 fib. 161,,
+55810,64,5219,161,HD 195647,retarget_fibers,header,MATCH,161,925.6,17.7,74.86,ASDAF HD195647 fib. 161,,
+55810,67,5219,158,HD 227049,retarget_fibers,log,MATCH,158,115.9,17.1,69.8,ASDAF HD227049 fib. 158,67 ASDAF HD227049 fib. 158˚,
+55810,68,5219,158,HD 227049,retarget_fibers,header,MATCH,158,75.4,17.1,69.8,ASDAF HD227049 fib. 158,,
+55810,69,5219,158,HD 227049,retarget_fibers,header,MATCH,158,283.0,17.1,69.8,ASDAF HD227049 fib. 158,,
+55810,70,5219,158,HD 227049,retarget_fibers,header,MATCH,158,125.0,17.1,69.8,ASDAF HD227049 fib. 158,,
+55810,71,5219,158,HD 227049,retarget_fibers,header,MATCH,158,216.3,17.1,69.8,ASDAF HD227049 fib. 158,,
+55810,72,5219,158,HD 227049,retarget_fibers,header,MATCH,158,199.0,17.1,69.8,ASDAF HD227049 fib. 158,,
+55810,73,5219,165,HD 227049,retarget_fibers,header,MATCH,165,360.8,17.3,69.8,ASDAF HD227049 fib. 165,,
+55810,74,5219,165,HD 227049,retarget_fibers,header,MATCH,165,663.8,17.3,69.8,ASDAF HD227049 fib. 165,,
+55810,75,5219,161,HD 227049,retarget_fibers,header,MATCH,161,989.4,18.0,69.8,ASDAF HD227049 fib. 161,,
+55810,76,5219,161,HD 227049,retarget_fibers,header,MATCH,161,1594.1,18.0,69.8,ASDAF HD227049 fib. 161,+76 all decent exposures in 3 different fibers,
+55811,50,4941,230,HD 193342,not_science,log,NO_DETECTION,50,3.2,22.1,46.89,ASDAF - HD193342,"-50 increasing clouds, switch to ASDAF | 50 HD193342, fiber 230",data check: no trace stands out (no star light in any fiber)
+55811,51,4941,230,HD 193342,not_science,log,NO_DETECTION,43,3.1,22.1,46.89,ASDAF - HD193342,"51 HD193342, fiber 230",data check: no trace stands out (no star light in any fiber)
+55811,52,4941,230,HD 193342,not_science,log,NO_DETECTION,22,2.2,22.1,46.89,ASDAF - HD193342,"52 HD193342, fiber 230",data check: no trace stands out (no star light in any fiber)
+55811,53,4941,230,HD 193342,not_science,log,NO_DETECTION,202,3.5,22.1,46.89,ASDAF - HD193342,"53 HD193342, fiber 230",data check: no trace stands out (no star light in any fiber)
+55811,54,4941,230,HD 193342,retarget_fibers,log,MATCH,230,170.9,20.5,46.89,"ASDAF - HD193342, fib. 230","54 HD193342, fiber 230",
+55811,55,4941,230,HD 193342,not_science,log,NO_DETECTION,230,4.3,20.5,46.89,"ASDAF - HD193342, fib. 230","55 HD193342, fiber 230",data check: no trace stands out (no star light in any fiber)
+55815,11,5258,204,2MASS J03322626+4603247,not_science,log,NO_DETECTION,78,3.6,22.5,30.95,J03322626+4603247,"-11 Attempt ASDAF sequence on 2MASS J03322626+4603247, but cloudy, low signal | 11 fiber 204",data check: no trace stands out (no star light in any fiber)
+55815,12,5258,191,2MASS J03322626+4603247,not_science,log,NO_DETECTION,272,2.7,22.5,30.95,J03322626+4603247,12 fiber 191,data check: no trace stands out (no star light in any fiber)
