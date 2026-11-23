@@ -40,7 +40,7 @@ overrides:
   - id: apo-55755-aadaf-vesta-f203
     observatory: apo
     mjd: 55755
-    exposures: "19-23,29"
+    exposures: "19,22-23,29"
     action: retarget_fibers
     fibers: {203: "VESTA"}
     other_fibers: offtarget
@@ -51,7 +51,7 @@ overrides:
       (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
     source:
       file: raw/APOGEE/apo/55755/55755.comments
-      quote: "19 Vesta goes to fiber 203. This one is extremely weak, signal ~ 45 / 20 Vesta goes to fiber 203, zero signal / 21 zero signal again... / 22 Vesta to fiber 203. Signal 380. / 23 Vesta to fiber 203. Signal 3500. / 29 Vesta fiber 203 signal 2400"
+      quote: "19 Vesta goes to fiber 203. This one is extremely weak, signal ~ 45 / 22 Vesta to fiber 203. Signal 380. / 23 Vesta to fiber 203. Signal 3500. / 29 Vesta fiber 203 signal 2400"
   - id: apo-55755-aadaf-vesta-f192
     observatory: apo
     mjd: 55755
@@ -70,7 +70,7 @@ overrides:
   - id: apo-55755-aadaf-vesta-f295
     observatory: apo
     mjd: 55755
-    exposures: "32-33"
+    exposures: "32"
     action: retarget_fibers
     fibers: {295: "VESTA"}
     other_fibers: offtarget
@@ -81,7 +81,22 @@ overrides:
       (raw header RA/DEC = the named object, not the plate centre 271.54, -25.05).
     source:
       file: raw/APOGEE/apo/55755/55755.comments
-      quote: "32 Vesta fiber 295 signal 1100 / 33 Vesta fiber 295 signal  140"
+      quote: "32 Vesta fiber 295 signal 1100"
+  - id: apo-55755-aadaf-vesta-unconfirmed
+    observatory: apo
+    mjd: 55755
+    exposures: "20-21,33"
+    action: not_science
+    reason: >-
+      Commissioning test "AADAF - any asteroid directed to any fiber" with plate 5099 (cart 3)
+      plugged: the telescope was pointed at VESTA, so no plugged fiber saw its plugmap target,
+      but the fiber that saw VESTA is not established (same rule as the handplaced-2011
+      block; data check = raw up-the-ramp signal, chip b, flat-calibrated trace numbering).
+      20 and 21: no trace stands out (brightest 3.5 and 2.6 MAD units). 33: fiber 295 is
+      brightest (46 MAD units) but fiber 197 has 0.41 of its signal.
+    source:
+      file: raw/APOGEE/apo/55755/55755.comments
+      quote: "20 Vesta goes to fiber 203, zero signal / 21 zero signal again... / 33 Vesta fiber 295 signal  140"
   - id: apo-55755-aadaf-betaoph-f203
     observatory: apo
     mjd: 55755

@@ -33,8 +33,11 @@ names an observatory, an MJD, a set of exposures and one action:
     say what happened to the remaining fibers: ``keep`` (unchanged) or
     ``offtarget`` (the telescope was pointed elsewhere, so no fiber that
     asserts a target identity saw its target; they become ``offtarget`` with
-    ``sdss_id`` -1). The affected exposures get their own fiber table, named
-    by the exposure column ``fiber_map_key``.
+    ``sdss_id`` -1). The affected exposures get their own fiber table, under
+    a synthetic ID (:func:`override_table_id`) that replaces their
+    ``plate_id`` (FPS: ``config_id``), so that every reader keying on that
+    column (ApogeeReduction.jl, ``almanac dump``) opens the edited table; the
+    header value is kept in ``original_plate_id`` (``original_config_id``).
 ``use_config``
     The exposure's fibers were at configuration ``config_id``, not at the one
     in the header.
@@ -459,6 +462,49 @@ def _base_key(exposure) -> str:
     return str(exposure.config_id if exposure.fps else exposure.plate_id)
 
 
+def _header_key(exposure) -> str:
+    """Plate / configuration key before any synthetic fiber-table ID (see override_table_id)."""
+    return str(exposure.original_config_id if exposure.fps else exposure.original_plate_id)
+
+
+def assign_override_table_ids(exposures, entries: List[Override]) -> None:
+    """
+    Give every exposure edited by ``retarget_fibers`` entries its own fiber
+    table ID (:func:`override_table_id`) in ``plate_id`` (plates) or
+    ``config_id`` (FPS), keeping the header value in ``original_plate_id``
+    (``original_config_id``). Exposures with the same header plate /
+    configuration and the same entries share one ID. Their targets are
+    loaded first, under the header ID. Idempotent.
+    """
+    retargets = {}
+    for entry in entries:
+        if entry.action != "retarget_fibers":
+            continue
+        for e in _exposures_by_number(exposures, entry):
+            retargets.setdefault(e.exposure, (e, []))[1].append(entry.id)
+    todo = [(n, e, ids) for n, (e, ids) in sorted(retargets.items()) if e._override_table_id is None]
+    if not todo:
+        return
+    table_ids = {}
+    for e in exposures:  # IDs already given on this night (normally none)
+        if e._override_table_id is not None:
+            table_ids[e._override_table_group] = e._override_table_id
+    for number, e, ids in todo:
+        e.targets  # load (and cache) the plate/configuration targets under the header ID
+        group = (_header_key(e), tuple(ids))
+        if group not in table_ids:
+            table_ids[group] = override_table_id(e.mjd, len(set(table_ids.values())) + 1)
+        e._override_table_id = table_ids[group]
+        e._override_table_group = group
+        if e.fps:
+            if e._original_config_id is None:
+                e._original_config_id = e.config_id
+            e.config_id = table_ids[group]
+        else:
+            e._original_plate_id = e.plate_id
+            e.plate_id = table_ids[group]
+
+
 def _note(exposure, entry: Override, action_text: str) -> None:
     ids = [i for i in exposure.override_ids.split(";") if i]
     acts = [a for a in exposure.override_actions.split(";") if a]
@@ -543,11 +589,37 @@ def apply_exposure_overrides(exposures, entries: List[Override]) -> None:
                             f"before exposure {e.exposure}"
                         )
                     new_config = earlier[-1].config_id
+                if e._original_config_id is None:
+                    e._original_config_id = header_config
                 e.config_id = new_config
                 _set_targets(e, None)
                 for k, v in _config_ids_from_summary(e).items():
                     setattr(e, k, v)
                 _note(e, entry, f"{entry.action}({header_config}->{new_config})")
+    # After the configuration overrides (a retarget's table copies the
+    # configuration in force), before sequences are built.
+    assign_override_table_ids(exposures, entries)
+
+
+#: Fiber tables edited by an override are stored under a synthetic ID, which
+#: also replaces the exposure's `plate_id` (plates) or `config_id` (FPS): readers
+#: that key on that column -- ApogeeReduction.jl's `get_fibTargDict`, `almanac
+#: dump stars`/`spectra` -- then open the edited table without any change. The
+#: header value is kept in `original_plate_id` / `original_config_id`. IDs are
+#: OVERRIDE_TABLE_ID_BASE + (mjd - 50000) * 1000 + k (k = 1, 2, ... per night, in
+#: exposure order): positive (no code treats them as "missing"), far above any
+#: real plate (< 20,000) or configuration (< 1,000,000) ID, and readable.
+OVERRIDE_TABLE_ID_BASE = 1_000_000_000
+
+
+def override_table_id(mjd: int, k: int) -> int:
+    if not 1 <= k <= 999:
+        raise OverrideError(f"too many overridden fiber tables on MJD {mjd} ({k})")
+    return OVERRIDE_TABLE_ID_BASE + (int(mjd) - 50000) * 1000 + k
+
+
+def is_override_table_id(value: int) -> bool:
+    return int(value) >= OVERRIDE_TABLE_ID_BASE
 
 
 def _retarget_row(t, entry: Override, target: HandplacedTarget, solar_system_sdss_id: int) -> None:
@@ -576,23 +648,30 @@ def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[
     BEFORE ``sdss_id`` assignment: each affected exposure gets a copy of the
     fiber table that would otherwise be written for its plate/configuration,
     with the retargeted rows rewritten from ``handplaced_targets.yaml``
-    (``targets``; default: the packaged file), stored under its own
-    ``fiber_map_key``. The cross-match that follows then treats the edited
-    rows like any other (see :func:`almanac.apogee.get_almanac_data`).
+    (``targets``; default: the packaged file). Exposures with the same
+    plate/configuration and the same entries share one edited table, stored
+    under a synthetic ID (:func:`override_table_id`) that replaces their
+    ``plate_id`` (or ``config_id``); the header value is kept in
+    ``original_plate_id`` (``original_config_id``). The cross-match that
+    follows then treats the edited rows like any other (see
+    :func:`almanac.apogee.get_almanac_data`), and so does every reader that
+    keys on ``plate_id`` / ``config_id``.
     """
     entries = [e for e in entries if e.action == "retarget_fibers"]
     if not entries:
         return
     targets = load_handplaced_targets() if targets is None else targets
     check_target_names(entries, targets)
+    assign_override_table_ids(exposures, entries)  # no-op if apply_exposure_overrides did it
 
-    # The table io would write for each key: that of the first exposure with
-    # that key and any targets (it carries the sdss_id assignments).
+    # The table io would write for each header plate/configuration: that of
+    # the first exposure with that key and any targets. The targets of the
+    # retargeted exposures were loaded under their header IDs.
     reference = {}
     for e in exposures:
         if e.image_type != "object":
             continue
-        key = _base_key(e)
+        key = _header_key(e)
         if key not in reference and e.targets:
             reference[key] = e.targets
 
@@ -602,7 +681,7 @@ def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[
             affected.setdefault(e.exposure, (e, []))[1].append(entry)
 
     for number, (e, es) in sorted(affected.items()):
-        key = _base_key(e)
+        key = _header_key(e)
         if key not in reference:
             raise OverrideError(f"{es[0].id}: no fiber table for {key} on exposure {number}")
         new = [t.model_copy(deep=True) for t in reference[key]]
@@ -628,13 +707,12 @@ def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[
                     t.override_id = offtarget_entry.id
 
         _set_targets(e, tuple(sorted(new, key=lambda t: t.fiber_id)))
-        e._fiber_map_key = f"{key}.override.{'+'.join(x.id for x in es)}"
 
     # Make sure the unmodified table for each key is still written (and
     # cross-matched) from the reference target list, even when the first
     # exposure of a sequence is one of the overridden exposures.
-    for key, targets in reference.items():
+    for key, reference_targets in reference.items():
         for e in exposures:
-            if e.image_type == "object" and _base_key(e) == key and e.exposure not in affected:
-                _set_targets(e, targets)
+            if e.image_type == "object" and _header_key(e) == key and e.exposure not in affected:
+                _set_targets(e, reference_targets)
                 break

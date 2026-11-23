@@ -201,7 +201,9 @@ class TestCrossMatchThroughNormalPath:
         by = {e.exposure: e for e in exposures}
 
         # Exposures 1-2 (the first of the sequence among them) share one edited table.
-        assert by[1].fiber_map_key == by[2].fiber_map_key == "4925.override.arc"
+        # They get their own fiber-table ID in plate_id (the column ARJ keys on).
+        assert by[1].plate_id == by[2].plate_id == 1005702001
+        assert by[1].fiber_map_key == "1005702001" and by[1].original_plate_id == 4925
         star = {t.fiber_id: t for t in by[1].targets}
         assert star[2].sdss_id == 126102647 and star[2].category == "science"
         assert star[1].category == "offtarget" and star[1].sdss_id == -1
@@ -223,15 +225,30 @@ class TestCrossMatchThroughNormalPath:
         entries = parse_overrides(_doc(_entry(id="arc", exposures="1")))
         exposures, _ = self._run(monkeypatch, entries)
         by = {e.exposure: e for e in exposures}
-        assert by[1].fiber_map_key == "4925.override.arc"
-        assert by[2].fiber_map_key == "4925"
+        assert by[1].fiber_map_key == "1005702001" and by[1].plate_id == 1005702001
+        assert by[1].original_plate_id == 4925
+        assert by[2].fiber_map_key == "4925" and by[2].plate_id == by[2].original_plate_id == 4925
         assert [t.sdss_id for t in by[2].targets] == [11, 12, 13, -1]
         assert {t.fiber_id: t for t in by[1].targets}[2].sdss_id == 126102647
+
+    def test_ids_and_sequences_without_fibers(self, monkeypatch):
+        """The fiber-table ID is given at the exposure stage: also without --fibers, and before sequences."""
+        import almanac.apogee as apogee
+        import almanac.overrides as ov
+
+        entries = parse_overrides(_doc(_entry(id="arc", exposures="2-3")))
+        monkeypatch.setattr(apogee, "get_exposures_and_missing", lambda o, m: (_night(), []))
+        monkeypatch.setattr(ov, "overrides_for", lambda o, m: entries)
+        *_, exposures, sequences, _ = apogee.get_almanac_data("apo", 55702, fibers=False)
+        assert [e.plate_id for e in exposures] == [4925, 1005702001, 1005702001, 4925]
+        assert [e.original_plate_id for e in exposures] == [4925] * 4
+        # The edited exposures are not part of the plate's visit.
+        assert sequences["objects"] == [(1, 1), (2, 3), (4, 4)]
 
     def test_no_overrides_unchanged(self, monkeypatch):
         entries = parse_overrides(_doc(_entry(id="arc", exposures="1")))
         exposures, seen = self._run(monkeypatch, entries, overrides=False)
-        assert all(e.fiber_map_key == "4925" for e in exposures)
+        assert all(e.fiber_map_key == "4925" and e.plate_id == 4925 for e in exposures)
         assert [t.sdss_id for t in exposures[0].targets] == [11, 12, 13, -1]
         assert "14153968+1910558" not in seen.get("twomass_psc", set())
 

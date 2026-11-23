@@ -27,8 +27,10 @@ which the named fiber's row is rewritten from the targets file (category
 `offtarget`. The ordinary cross-match then runs on that copy, so the star gets
 its `sdss_id` through the same lookups as any plugged fiber (DR17 allStar
 APOGEE ID lookup, then 2MASS PSC; or the catalogid lookup), and
-`almanac add metadata` picks the `sdss_id` up from the `fibers/<fiber_map_key>`
-table like any other. No `sdss_id` is stored in either file.
+`almanac add metadata` picks the `sdss_id` up from the edited table like any
+other. The edited table is stored under a synthetic ID that replaces the
+exposure's `plate_id` (header value kept in `original_plate_id`), so
+ApogeeReduction.jl, which opens `fibers/<plate_id>`, reads it with no change. No `sdss_id` is stored in either file.
 
 A solar-system body has no fixed position and no catalogue entry: its row
 keeps category `retargeted`, ra/dec NaN, no designation, and `sdss_id` =

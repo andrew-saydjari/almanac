@@ -92,7 +92,10 @@ class TestParsing:
         assert entries, "the packaged override file should not be empty"
         vesta = [e for e in entries if e.id == "apo-55755-aadaf-vesta-f203"]
         assert vesta and vesta[0].fibers == {203: "VESTA"}
-        assert vesta[0].exposures == (19, 20, 21, 22, 23, 29)
+        assert vesta[0].exposures == (19, 22, 23, 29)
+        # The Vesta exposures with no light on an identified fiber are not_science.
+        bad = [e for e in entries if e.id == "apo-55755-aadaf-vesta-unconfirmed"]
+        assert bad and bad[0].action == "not_science" and bad[0].exposures == (20, 21, 33)
         for e in entries:
             assert e.source_quote and e.source_file and e.reason
 
@@ -204,9 +207,10 @@ class TestApply:
         # must still be written, with sdss_ids, by the first unaffected exposure.
         assert e2.fiber_map_key == "5099"
         assert [t.sdss_id for t in e2.targets] == [1001, 1002, 1003, -1]
-        assert e1.fiber_map_key == "5099.override.vesta"
-        assert e3.fiber_map_key == "5099.override.vesta"
-        assert e4.fiber_map_key == "5099.override.star"
+        # Edited exposures get their own fiber-table ID in plate_id, one per entry set.
+        assert e1.plate_id == e3.plate_id == 1005755001 and e1.fiber_map_key == "1005755001"
+        assert e4.plate_id == 1005755002 and e4.fiber_map_key == "1005755002"
+        assert e1.original_plate_id == e4.original_plate_id == e2.plate_id == 5099
 
         t = {x.fiber_id: x for x in e1.targets}
         # A solar-system body: no catalogue identity, sdss_id = solar_system_sdss_id.
@@ -256,6 +260,8 @@ class TestApply:
         assert exposures[2].config_id == 100 and exposures[2].override_actions == "use_previous_config(101->100)"
         assert exposures[3].config_id == 100 and exposures[3].override_actions == "use_config(101->100)"
         assert exposures[3].fiber_map_key == "100"
+        assert exposures[3].original_config_id == 101 and exposures[2].original_config_id == 101
+        assert exposures[0].original_config_id == 100
         assert exposures[0].config_id == 100 and exposures[0].override_ids == ""
 
     def test_use_previous_config_without_previous_fails(self):
@@ -272,7 +278,9 @@ class TestApply:
             write_models_to_hdf5_group(exposures, fp.create_group("exposures"))
             write_models_to_hdf5_group(exposures[1].targets, fp.create_group("fibers"))
             assert [x.decode() for x in fp["exposures/override_ids"][:]] == ["", "apo-55755-test"]
-            assert [x.decode() for x in fp["exposures/fiber_map_key"][:]] == ["5099", "5099.override.apo-55755-test"]
+            assert [x.decode() for x in fp["exposures/fiber_map_key"][:]] == ["5099", "1005755001"]
+            assert list(fp["exposures/plate_id"][:]) == [5099, 1005755001]
+            assert list(fp["exposures/original_plate_id"][:]) == [5099, 5099]
             assert fp["fibers/category"][0].decode() == RETARGETED_CATEGORY
             assert fp["fibers/override_target"][0].decode() == "VESTA"
 

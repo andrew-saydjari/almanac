@@ -1193,7 +1193,10 @@ def get_almanac_data(
         from almanac.overrides import overrides_for, apply_exposure_overrides
         night_overrides = overrides_for(observatory, mjd)
         if night_overrides:
-            # Before sequences: a configuration override changes `config_id`.
+            # Before sequences: a configuration override changes `config_id`,
+            # and an exposure whose fibers are edited gets its own fiber-table
+            # ID in `plate_id` / `config_id` (so it is not part of the plate's
+            # or configuration's visit).
             apply_exposure_overrides(exposures, night_overrides)
             logger.info(
                 f"{observatory}/{mjd}: applied exposure overrides "
