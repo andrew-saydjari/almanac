@@ -125,9 +125,14 @@ Control output verbosity (stackable).
 ### Performance Options
 
 #### `--processes <integer>`, `-p <integer>`
-Number of parallel processes for data processing.
-- **Default**: Automatic based on available CPU cores
+Worker processes (each processes one observatory/MJD pair).
+- **Default**: the CPU budget: `SLURM_CPUS_ON_NODE` in a Slurm job (or the CPU affinity if smaller), else `len(os.sched_getaffinity(0))`, else `os.cpu_count()`. Never more than the number of observatory/MJD pairs, so a one-night run is done in the main process. Negative values mean the default; `0` or `1` run in the main process.
 - **Example**: `almanac --processes 4 --mjd-start -30`
+
+#### `--query-workers <integer>`
+The most worker processes that hold a database connection at once. Every night needs the database (expected exposures from opsdb; with `--fibers` and without `--no-x-match`, the `sdss_id` cross-match). When `--processes` is larger, a worker takes a slot at its first query of a night and closes its connection and frees the slot when that night is done; the other workers keep reading files meanwhile. The main process closes its own connection before the workers start.
+- **Default**: the `catalog_query_max_workers` [configuration setting](configuration.md) (4)
+- **Example**: `almanac -p 32 --query-workers 4 --fibers --mjd-start 60800 --mjd-end 60830`
 
 ### Fault Tolerance
 
@@ -161,13 +166,13 @@ almanac add metadata new.h5 --output targets_new.h5 --since targets.h5   # incre
 **Options**:
 - Date/MJD selection: `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, `--date`, `--date-start`/`--date-end` (defaults to every MJD present in the file)
 - Observatory selection: `--apo`, `--lco`
-- `--query-workers <integer>`: parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection. `0` runs the queries in-process.
+- `--query-workers <integer>`: parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection, so this is also the number of connections. `0` runs the queries in-process. This command reads no raw files, so it has no `--processes`.
 - `--output, -O <file>`: write `/meta` to this new file; INPUT is opened read-only.
 - `--since <file>`: copy the `/meta` rows of a previously decorated file or targets file and query only the `sdss_id` it lacks (ids it recorded as not found are not re-queried unless `--retry-not-found`).
 - `--restrict-to <file>`: only build rows for these `sdss_id` (`.npy`, `.h5` with `/meta/sdss_id` or `/sdss_id`, or text with one id per line).
 - `--checkpoint-dir <dir>`, `--batch-size <n>`, `--fresh`, `--keep-checkpoint`, `--max-batch-attempts <n>`, `--retry-backoff <s>`
 - `--extended`: also write 79 value-added columns after the default ones (adapted from upstream sdss/almanac `a922dee`): SDSS_ID position (`ra`, `dec`, `l`, `b`, `healpix` at nside 128, RING), `n_associated`; unWISE W1/W2 fluxes, magnitudes and flags; GLIMPSE 4.5 µm; Bailer-Jones et al. (2021) distances; Gaia DR3 synthetic photometry (GSPC); Zhang, Green & Rix (2023) parameters (`zgr_*`); SDSS-IV APOGEE (DR17) targeting bitmasks (`sdss4_apogee_*`). Off by default: without it `/meta` has exactly the default columns. It runs 8 more queries per batch: measured 2026-11-19 with one query worker, the extra queries cost about 47–77 ms per `sdss_id` on a cold database cache, against about 5–9 ms per `sdss_id` for the default queries on a warm cache, and about 1.4–2.3 ms per `sdss_id` when warm. The checkpoint remembers the mode and is refused in the other one; with `--since`, rows of a file without the extended columns are queried again rather than copied. A value-added query that fails makes the batch fail and be retried (it is never skipped into default values). Upstream's 15 reddening columns (`ebv*`) are not written: nothing fills them. `/meta` gets the attributes `extended` and `extended_column_groups` in this mode only. Needs `healpy` (a declared dependency).
-- `--p <integer>`: unused, kept for compatibility.
+- (`--p` was removed: it had been ignored for a long time; use `--query-workers`.)
 
 **Operational note — run this database-local.** `add metadata` throughput is strongly sensitive to database locality and cache state. Measured on a full-survey file (~4.7 million unique `sdss_id`s) with the database on the local network: ~660 ids/s (cold catalog cache; ~2h15m wall), versus 13,000–26,000 ids/s on small warmed-up slices. Over an SSH tunnel the same pass becomes impractically slow. Run `add metadata` on a host local to the SDSS database (e.g. at Utah), never through a tunnel, and budget memory for the final assembly (the finished batches are read back into RAM for the single final write).
 
@@ -344,7 +349,7 @@ For bash completion support, consider adding alias:
 ```bash
 # Add to ~/.bashrc or ~/.bash_profile  
 alias almanac='almanac'
-complete -W '--mjd --mjds --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --full-apogee-id-lookup --live-apogee-id-join --output --skip-existing --processes --verbosity --help' almanac
+complete -W '--mjd --mjds --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --full-apogee-id-lookup --live-apogee-id-join --output --skip-existing --processes --query-workers --verbosity --help' almanac
 ```
 
 ## Tips

@@ -268,9 +268,10 @@ def query(sdss_ids: List[int], batch_size: int = 10_000, tqdm_kwds=None, max_wor
     """
     from almanac import config
 
-    if max_workers is None:
-        max_workers = int(getattr(config, "catalog_query_max_workers", 4))
-    max_workers = max(1, min(max_workers, os.cpu_count() or 1))
+    from almanac.parallel import cpu_budget, resolve_query_workers
+
+    max_workers, _ = resolve_query_workers(max_workers, config=config)
+    max_workers = max(1, min(max_workers, cpu_budget()[0]))
 
     meta = {}
     tqdm_kwds = tqdm_kwds or {}
