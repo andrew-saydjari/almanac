@@ -152,6 +152,31 @@ def collect_sdss_ids(input_path: str, observatories: Sequence[str], mjds=None) -
     return np.unique(np.concatenate(parts))
 
 
+def solar_system_ids(ids) -> np.ndarray:
+    """
+    The non-positive sdss_id in ``ids`` that stand for a solar-system body placed
+    on a fiber by an exposure override (``solar_system_sdss_id`` of
+    ``almanac/etc/handplaced_targets.yaml``; 0).
+    """
+    from almanac.overrides import load_handplaced_targets
+
+    ssid = load_handplaced_targets().solar_system_sdss_id
+    ids = np.asarray(ids, dtype=np.int64)
+    return np.asarray(sorted({int(ssid)} & set(ids.tolist())), dtype=np.int64)
+
+
+#: The /meta row of a solar-system body (reflected sunlight). It has no catalogue
+#: entry, so every catalogue column keeps its default (-1 / "" / NaN): no
+#: identifiers, astrometry, photometry, catalogue stellar parameters or
+#: targeting flags. Only these are set. Reproducible from the targets file
+#: (solar_system_sdss_id) and this constant; never queried.
+SOLAR_SYSTEM_META = {"catalogid": -1, "version_id": -1, "lead": "solar_system"}
+
+
+def solar_system_rows(ids) -> Dict[int, dict]:
+    return {int(i): {"sdss_id": int(i), **SOLAR_SYSTEM_META} for i in ids}
+
+
 def _ids_digest(ids: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(ids, dtype=np.int64).tobytes()).hexdigest()
 
@@ -648,6 +673,7 @@ def build_metadata(
         all_ids = collect_sdss_ids(input_path, observatories, mjds)
     else:
         all_ids = np.unique(np.asarray(list(ids), dtype=np.int64))
+    solar_ids = solar_system_ids(all_ids)
     n_nonpositive = int(np.count_nonzero(all_ids <= 0))
     all_ids = all_ids[all_ids > 0]
     n_input = int(all_ids.size)
@@ -658,6 +684,7 @@ def build_metadata(
         f"{n_input:,} unique positive sdss_id in {input_path}"
         + (f"; {all_ids.size:,} after --restrict-to {restrict_to}" if restrict_to else "")
         + (f" ({n_nonpositive} non-positive value(s) skipped)" if n_nonpositive else "")
+        + (f"; fixed solar-system row(s) for sdss_id {solar_ids.tolist()}" if solar_ids.size else "")
     )
 
     # 2. What is already known (--since).
@@ -832,6 +859,11 @@ def build_metadata(
     # 5. Assemble.
     _log("assembling /meta from the checkpoint")
     parts, descriptions, unknown_all, queried = [copied_columns], dict(prev_descriptions), set(), []
+    if solar_ids.size:
+        # Fixed rows, never queried (see solar_system_rows).
+        solar_columns, solar_descriptions, _, _ = results_to_columns(solar_system_rows(solar_ids), extended)
+        parts.append(solar_columns)
+        descriptions.update(solar_descriptions)
     pair_parts = [copied_pairs]
     for i, _ in batches:
         q, cols, desc, unknown, _, _, pairs = ckpt.read_batch(i)
@@ -870,6 +902,7 @@ def build_metadata(
         output_path=output_path or input_path,
         mode="output" if output_path else "in_place",
         n_sdss_id=int(found.size),
+        n_solar_system_rows=int(solar_ids.size),
         n_sdss_id_input=n_input,
         n_sdss_id_requested=int(all_ids.size),
         n_queried=int(queried.size),

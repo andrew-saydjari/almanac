@@ -76,7 +76,13 @@ class Exposure(BaseModel):
 
     _targets: Optional[Tuple[Union[FPSTarget, PlateTarget]]] = None
     _override_not_science: bool = False
-    _fiber_map_key: Optional[str] = None
+    # Header plate / configuration ID, kept when an exposure override replaced
+    # `plate_id` / `config_id` (see `original_plate_id`, `original_config_id`).
+    _original_plate_id: Optional[int] = None
+    _original_config_id: Optional[int] = None
+    _override_table_id: Optional[int] = None
+    _override_table_group: Optional[tuple] = None
+    _header_pointing: Optional[tuple] = None
 
     @computed_field(description="Exposure string used in path")
     def exposure_string(self) -> str:
@@ -112,15 +118,34 @@ class Exposure(BaseModel):
 
     @computed_field(
         description=(
-            "Key of this exposure's table under raw/<obs>/<mjd>/fibers/: the "
-            "configuration (FPS) or plate ID, or a distinct key when an exposure "
-            "override edited the fibers of this exposure only"
+            "Key of this exposure's table under raw/<obs>/<mjd>/fibers/: always "
+            "str(config_id) (FPS) or str(plate_id) (plates). An exposure override "
+            "that edits the fibers of an exposure gives it its own (synthetic) "
+            "plate_id / config_id, so readers that key on those columns open the "
+            "edited table"
         )
     )
     def fiber_map_key(self) -> str:
-        if self._fiber_map_key is not None:
-            return self._fiber_map_key
         return str(self.config_id if self.fps else self.plate_id)
+
+    @computed_field(
+        description=(
+            "Plate ID from the raw header; differs from plate_id only when an "
+            "exposure override gave the exposure its own fiber table"
+        )
+    )
+    def original_plate_id(self) -> int:
+        return self.plate_id if self._original_plate_id is None else self._original_plate_id
+
+    @computed_field(
+        description=(
+            "Configuration ID from the raw header; differs from config_id only when "
+            "an exposure override changed the configuration or gave the exposure "
+            "its own fiber table"
+        )
+    )
+    def original_config_id(self) -> int:
+        return self.config_id if self._original_config_id is None else self._original_config_id
 
 
     @computed_field

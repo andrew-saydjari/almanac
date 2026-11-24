@@ -281,7 +281,14 @@ class TestQuerySQL:
     def _sql(self, monkeypatch, apogee_ids):
         pytest.importorskip("sdssdb")
         captured = {}
-        monkeypatch.setattr(apogee, "_execute_query", lambda q: captured.setdefault("q", q) and [])
+        def capture(q):
+            # Record the query and return no rows. (Never test the query's truth
+            # value: peewee's __len__ executes it, which ran the full allStar
+            # join against the live database.)
+            captured["q"] = q
+            return []
+
+        monkeypatch.setattr(apogee, "_execute_query", capture)
         try:
             apogee._query_apogee_id_rows(apogee_ids)
         except Exception as e:  # pragma: no cover - environment without catalogdb
