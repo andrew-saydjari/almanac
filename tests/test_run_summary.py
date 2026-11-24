@@ -9,7 +9,7 @@ import almanac.apogee as apogee
 from almanac import io
 from almanac.cli import _failure_category, _run_exit_status, main
 from almanac.exit_codes import CATEGORY_EXIT_STATUS, ExitStatus, exit_status_for
-from tests.helpers import SEQUENCES, make_exposures
+from tests.helpers import SEQUENCES, fake_targets, make_exposures
 
 MJD = 60000
 
@@ -41,7 +41,14 @@ def fake_nights(monkeypatch):
         if kind == "no_data":
             return observatory, mjd, [], {}, []
         missing = [db_unavailable_row(observatory, mjd)] if kind == "db_unavailable" else []
-        return observatory, mjd, make_exposures(observatory, mjd), dict(SEQUENCES), missing
+        exposures = make_exposures(observatory, mjd)
+        if fibers:
+            # The real night path loads (and cross-matches) the targets in the
+            # worker (`apogee.process_night`); do the same here, so the writer
+            # never reads confSummary files (no sdsscore checkout in CI).
+            for e in exposures:
+                e._targets = fake_targets(e) if e.image_type == "object" else ()
+        return observatory, mjd, exposures, dict(SEQUENCES), missing
 
     monkeypatch.setattr(apogee, "get_almanac_data", fake)
     # No database in the tests: the parent-side cross-match setup is a no-op.
@@ -176,6 +183,46 @@ def test_write_failed_exit_8(tmp_path, fake_nights, monkeypatch):
     assert result.exit_code == ExitStatus.WRITE_FAILED
     with h5.File(out, "r") as fp:
         assert [r["category"] for r in io.read_run_summary(fp)] == ["write_failed"]
+
+
+def _night_through_process_night(observatory, mjd, fibers=False, meta=False, **kwargs):
+    """`get_almanac_data` with the real night path, on the helper exposures."""
+    return apogee.process_night(
+        observatory, mjd, make_exposures(observatory, mjd), (), fibers=fibers, meta=meta, **kwargs
+    )
+
+
+@pytest.mark.parametrize("processes", [1, 2])
+def test_missing_confsummary_is_night_exception_not_write_failed(
+    tmp_path, fake_nights, monkeypatch, processes
+):
+    # A configuration without a confSummary file: the targets are loaded in
+    # the night pipeline (worker side), so the night fails there as an
+    # exception (6), never in the writer as WRITE_FAILED (8), which stops
+    # whole builds and is reserved for output I/O errors.
+    from almanac.config import config
+
+    sdsscore = tmp_path / "sdsscore"
+    sdsscore.mkdir()
+    monkeypatch.setattr(config, "sdsscore_dir", str(sdsscore))
+    monkeypatch.setattr(apogee, "get_almanac_data", _night_through_process_night)
+    monkeypatch.setattr("almanac.cli._pool_initializer", lambda *a, **k: None)
+    writes = []
+    real_update = io.update
+    monkeypatch.setattr(io, "update", lambda *a, **k: (writes.append(a[1:3]), real_update(*a, **k)))
+    out = str(tmp_path / "a.h5")
+    mjds = f"{MJD},{MJD + 1}" if processes > 1 else str(MJD)
+    result = run_cli(["--mjds", mjds, "--apo", "-O", out, "-p", str(processes), "--fibers"])
+    assert result.exit_code == ExitStatus.NIGHT_EXCEPTION
+    with h5.File(out, "r") as fp:
+        rows = io.read_run_summary(fp)
+        assert f"raw/apo/{MJD}" not in fp
+    assert {(r["mjd"], r["category"]) for r in rows} == {
+        (m, "exception") for m in map(int, mjds.split(","))
+    }
+    assert all("Could not find confSummary file for config 123" in r["message"] for r in rows)
+    if processes == 1:
+        assert writes == []  # the writer was never reached
 
 
 def _die_in_worker(observatory, mjd, *args, **kwargs):
