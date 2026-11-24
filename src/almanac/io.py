@@ -86,9 +86,9 @@ def update(
         fibers_group = get_or_create_group(fp, f"raw/{observatory}/{mjd}/fibers")
         done = set()
         for exposure in exposures:
-            reference_id_string = str(
-                exposure.config_id if exposure.fps else exposure.plate_id
-            )
+            # Normally the configuration (FPS) or plate ID; an exposure
+            # override that edits fibers gives the exposure its own key.
+            reference_id_string = exposure.fiber_map_key
             if reference_id_string in done:
                 # Check `done` BEFORE touching `exposure.targets`: `targets`
                 # is a lazy property, and for exposures whose configuration

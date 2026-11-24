@@ -32,6 +32,7 @@ Table of Contents
    cli-reference
    configuration
    data-formats
+   exposure-overrides
    faq
 
 .. toctree::

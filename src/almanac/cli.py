@@ -74,6 +74,14 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
     "--no-x-match", is_flag=True, help="Do not cross-match targets with SDSS-V database"
 )
 @click.option(
+    "--no-overrides",
+    is_flag=True,
+    help=(
+        "Do not apply the exposure overrides in almanac/etc/exposure_overrides.yaml "
+        "(for diffing their effect)"
+    ),
+)
+@click.option(
     "--full-apogee-id-lookup",
     is_flag=True,
     help=(
@@ -128,6 +136,7 @@ def main(
     lco,
     fibers,
     no_x_match,
+    no_overrides,
     full_apogee_id_lookup,
     live_apogee_id_join,
     output,
@@ -179,6 +188,10 @@ def main(
         else nullcontext()
     )
     io_kwds = dict(fibers=fibers, compression=False)
+    from almanac.overrides import load_overrides, overrides_attrs
+    if not no_overrides:
+        load_overrides()  # a malformed override file fails here, before any work
+    override_attrs = overrides_attrs(not no_overrides)
     with h5.File(output, "a") if output else nullcontext() as fp:
         if skip_existing and output:
             kept = []
@@ -232,6 +245,7 @@ def main(
 
             def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
                 io.update(fp, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
+                fp[f"raw/{observatory_w}/{mjd_w}"].attrs.update(override_attrs)
                 if lookup_attrs:
                     # Which APOGEE ID -> SDSS ID source cross-matching used
                     # (view and its refresh date, or the live join).
@@ -331,6 +345,7 @@ def main(
                                     mjd,
                                     fibers,
                                     not no_x_match,
+                                    overrides=not no_overrides,
                                 )
                             ] = (mjd, observatory)
                             if n == processes:
@@ -401,6 +416,7 @@ def main(
                                         mjd,
                                         fibers,
                                         not no_x_match,
+                                        overrides=not no_overrides,
                                     )
                                 ] = (mjd, observatory)
 
@@ -434,7 +450,8 @@ def main(
                         (
                             observatory, mjd, exposures, sequences, missing
                         ) = result = apogee.get_almanac_data(
-                            observatory, mjd, fibers, not no_x_match
+                            observatory, mjd, fibers, not no_x_match,
+                            overrides=not no_overrides,
                         )
                     except KeyboardInterrupt:
                         if writer is not None:

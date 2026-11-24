@@ -71,6 +71,18 @@ class PlateTarget(BaseModel):
     buffer: float = Field(default=-1, description="Buffer size")
     priority: int = Field(default=-1, description="Target priority")
 
+    original_category: Category = Field(
+        default="",
+        description=(
+            "Category from the plugmap, kept only when almanac has changed "
+            "`category` (by an exposure override)"
+        )
+    )
+
+    # Exposure overrides (see `almanac.overrides`; empty when none applies)
+    override_id: str = Field(default="", description="Id of the exposure override that changed this fiber (empty if none)")
+    override_target: str = Field(default="", description="Name of the object an exposure override says was in this fiber (empty if none)")
+
 
     @validator('hole_type', 'planned_hole_type', 'obj_type', pre=True)
     def enforce_lower_case(cls, v):

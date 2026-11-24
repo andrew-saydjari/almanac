@@ -66,6 +66,11 @@ ImageType = Annotated[
 #: other patch of sky, so the assigned target's identity does not apply to it.
 OFF_TARGET_CATEGORY = "offtarget"
 
+#: Category given by an exposure override (`almanac.overrides`) to a fiber that
+#: saw a named object other than the catalogue target (e.g. an asteroid placed
+#: on the fiber by hand). The name is in the fiber's `override_target`.
+RETARGETED_CATEGORY = "retargeted"
+
 Category = Annotated[
     Literal[
         "",
@@ -87,13 +92,14 @@ Category = Annotated[
         "open_fiber",
         "unplugged",
         OFF_TARGET_CATEGORY,
+        RETARGETED_CATEGORY,
     ],
     BeforeValidator(validate_str)
 ]
 
 #: Categories which make no assertion about which target was in the fiber, and so
 #: are never cross-matched to an `sdss_id`.
-CATEGORIES_WITHOUT_SDSS_ID = ("unplugged", OFF_TARGET_CATEGORY)
+CATEGORIES_WITHOUT_SDSS_ID = ("unplugged", OFF_TARGET_CATEGORY, RETARGETED_CATEGORY)
 
 
 def asserts_target_identity(category: str) -> bool:

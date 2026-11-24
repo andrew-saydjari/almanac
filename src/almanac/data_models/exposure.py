@@ -64,7 +64,19 @@ class Exposure(BaseModel):
     #> File Metadata
     file_size: int = Field(default=-1, description="File size in bytes")
 
+    #> Overrides (see `almanac.overrides`; empty when none applies)
+    override_ids: str = Field(
+        default="",
+        description="';'-separated ids of the exposure overrides applied to this exposure (empty if none)"
+    )
+    override_actions: str = Field(
+        default="",
+        description="';'-separated description of what each applied override did (empty if none)"
+    )
+
     _targets: Optional[Tuple[Union[FPSTarget, PlateTarget]]] = None
+    _override_not_science: bool = False
+    _fiber_map_key: Optional[str] = None
 
     @computed_field(description="Exposure string used in path")
     def exposure_string(self) -> str:
@@ -96,7 +108,19 @@ class Exposure(BaseModel):
             (self.image_type == "object")
         &   ((self.fps and self.config_id <= 0) or (not self.fps and self.plate_id <= 0))
         )
-        return marked_bad or missing_plate_info
+        return marked_bad or missing_plate_info or self._override_not_science
+
+    @computed_field(
+        description=(
+            "Key of this exposure's table under raw/<obs>/<mjd>/fibers/: the "
+            "configuration (FPS) or plate ID, or a distinct key when an exposure "
+            "override edited the fibers of this exposure only"
+        )
+    )
+    def fiber_map_key(self) -> str:
+        if self._fiber_map_key is not None:
+            return self._fiber_map_key
+        return str(self.config_id if self.fps else self.plate_id)
 
 
     @computed_field
