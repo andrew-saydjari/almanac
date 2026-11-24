@@ -1896,7 +1896,10 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
 
                     ok = (
                         (config_group["catalogid"][:] > 0)
-                        | (config_group["sdss_id"][:] > 0)
+                        # >= 0: sdss_id 0 is a solar-system body placed on a
+                        # fiber by an exposure override (Vesta; see
+                        # almanac/etc/handplaced_targets.yaml).
+                        | (config_group["sdss_id"][:] >= 0)
                         | (config_group["twomass_designation"][:].astype(str) != "")
                     ) * np.isin(
                         config_group["category"][:].astype(str),

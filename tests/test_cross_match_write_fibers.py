@@ -64,11 +64,12 @@ class TestWriteFibers:
     def test_fiber_map_key_override_gets_own_group_and_replaces(self, tmp_path):
         path = str(tmp_path / "night.h5")
         exposures = _with_targets(make_exposures(), _targets())
-        exposures[1]._fiber_map_key = "123_e2"
+        # An override that edits fibers gives its exposure a synthetic id (#20).
+        exposures[1].config_id = 1_000_000_123
         exposures[1]._targets = tuple(_targets()[:2])
         with h5.File(path, "a") as fp:
             io.write_fibers(fp, "apo", MJD, exposures)
             io.write_fibers(fp, "apo", MJD, exposures)  # replaces in place
         with h5.File(path, "r") as fp:
-            assert sorted(fp[f"raw/apo/{MJD}/fibers"]) == ["123", "123_e2"]
-            assert len(fp[f"raw/apo/{MJD}/fibers/123_e2/fiber_id"]) == 2
+            assert sorted(fp[f"raw/apo/{MJD}/fibers"]) == ["1000000123", "123"]
+            assert len(fp[f"raw/apo/{MJD}/fibers/1000000123/fiber_id"]) == 2

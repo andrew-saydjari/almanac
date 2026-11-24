@@ -86,6 +86,7 @@ class FPSTarget(BaseModel):
     # Exposure overrides (see `almanac.overrides`; empty when none applies)
     override_id: str = Field(default="", description="Id of the exposure override that changed this fiber (empty if none)")
     override_target: str = Field(default="", description="Name of the object an exposure override says was in this fiber (empty if none)")
+    override_kind: str = Field(default="", description="Kind of that object: 'star' (cross-matched as usual) or 'solar_system' (not cross-matched; sdss_id set by the override); empty if none")
 
     @property
     def expected_to_be_assigned_sdss_id(self) -> bool:

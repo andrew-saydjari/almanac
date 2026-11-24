@@ -371,3 +371,33 @@ class TestCli:
     def test_cli_help_documents_copy_workflow(self):
         r = CliRunner().invoke(main, ["add", "metadata", "--help"])
         assert "COPY" in r.output and "--since" in r.output and "--output" in r.output
+
+
+class TestSolarSystemRow:
+    """sdss_id 0 (a solar-system body placed on a fiber by an override): a fixed row, never queried."""
+
+    def test_fixed_row_written_and_not_queried(self, tmp_path):
+        inp = str(tmp_path / "almanac.h5")
+        make_almanac(inp)
+        with h5.File(inp, "a") as fp:
+            g = fp.create_group("raw/apo/55755/fibers/1005755001")
+            g.create_dataset("sdss_id", data=np.array([-1, 0, IDS[0]], dtype=np.int64))
+        out = str(tmp_path / "targets.h5")
+        rec = Recorder()
+        build(tmp_path, rec, input_path=inp, output_path=out)
+        assert 0 not in rec.queried and -1 not in rec.queried
+        cols, attrs, nf = read_meta(out)
+        assert cols["sdss_id"][0] == 0 and 0 not in nf
+        assert cols["lead"][0].decode() == "solar_system"
+        assert cols["catalogid"][0] == -1 and cols["version_id"][0] == -1
+        assert np.isnan(cols["gaia_ra"][0]) and np.isnan(cols["twomass_h_m"][0])
+        assert not cols["sdss5_target_flags"][0].any()
+        assert attrs["n_solar_system_rows"] == 1
+        assert attrs["n_sdss_id"] == len(set(IDS) - NOT_FOUND) + 1
+
+    def test_no_row_without_id_zero(self, tmp_path):
+        inp = make_almanac(str(tmp_path / "almanac.h5"))
+        out = str(tmp_path / "targets.h5")
+        build(tmp_path, fake_query, input_path=inp, output_path=out)
+        cols, attrs, _ = read_meta(out)
+        assert 0 not in cols["sdss_id"] and attrs["n_solar_system_rows"] == 0

@@ -90,9 +90,10 @@ def write_fibers(fp, observatory, mjd, exposures, verbose: bool = False):
     """
     Write the fiber-to-target mappings for one observatory and MJD to
     `raw/{observatory}/{mjd}/fibers/{key}`, one group per configuration (FPS
-    era) or plate (plate era); an exposure override that edits fibers gives
-    its exposure its own key (`Exposure.fiber_map_key`). Existing groups for
-    the same key are replaced.
+    era) or plate (plate era), keyed by `Exposure.fiber_map_key` (an exposure
+    override that edits fibers gives its exposure a synthetic configuration or
+    plate ID, so its own table). Existing groups for the same key are
+    replaced.
 
     Only the first exposure of each key is consulted, and only exposures
     whose `targets` have been populated (see

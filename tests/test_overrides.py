@@ -13,6 +13,7 @@ from almanac.overrides import (
     OverrideError,
     apply_exposure_overrides,
     apply_fiber_overrides,
+    load_handplaced_targets,
     load_overrides,
     overrides_attrs,
     overrides_for,
@@ -54,6 +55,15 @@ def plate_target(fiber_id, category="science", sdss_id=1000):
     )
 
 
+TEST_TARGETS = load_handplaced_targets(textwrap.dedent("""
+    version: 1
+    solar_system_sdss_id: 0
+    targets:
+      VESTA: {kind: solar_system, jpl_horizons_id: "4"}
+      HD 1: {kind: star, ra: 1.25, dec: 67.8, twomass_designation: "00050000+6748000"}
+"""))
+
+
 def make_exposures(n=6, plate=5099):
     """Object exposures 1..n of one plate, each with a 4-fiber table; fiber 4 is sky."""
     exposures = []
@@ -82,7 +92,12 @@ class TestParsing:
         assert entries, "the packaged override file should not be empty"
         vesta = [e for e in entries if e.id == "apo-55755-aadaf-vesta-f203"]
         assert vesta and vesta[0].fibers == {203: "VESTA"}
-        assert vesta[0].exposures == (19, 20, 21, 22, 23, 29)
+        assert vesta[0].exposures == (19, 22, 23, 29)
+        # The Vesta exposures with no light on an identified fiber are not_science.
+        bad = [e for e in entries if e.id == "apo-55755-aadaf-vesta-unconfirmed"]
+        assert bad and bad[0].action == "not_science" and bad[0].exposures == (20, 21)
+        f295 = [e for e in entries if e.id == "apo-55755-aadaf-vesta-f295"]
+        assert f295[0].exposures == (32, 33)
         for e in entries:
             assert e.source_quote and e.source_file and e.reason
 
@@ -187,27 +202,38 @@ class TestApply:
             entry(id="star", exposures="4", action="retarget_fibers", fibers={3: "HD 1"}, other_fibers="keep"),
         ))
         apply_exposure_overrides(exposures, entries)
-        apply_fiber_overrides(exposures, entries)
+        apply_fiber_overrides(exposures, entries, TEST_TARGETS)
 
         e1, e2, e3, e4 = exposures[:4]
         # Exposure 1 was the sdss_id carrier and is overridden: the plain table
         # must still be written, with sdss_ids, by the first unaffected exposure.
         assert e2.fiber_map_key == "5099"
         assert [t.sdss_id for t in e2.targets] == [1001, 1002, 1003, -1]
-        assert e1.fiber_map_key == "5099.override.vesta"
-        assert e3.fiber_map_key == "5099.override.vesta"
-        assert e4.fiber_map_key == "5099.override.star"
+        # Edited exposures get their own fiber-table ID in plate_id: one per entry
+        # set, except that each exposure with a solar-system body (VESTA in the
+        # packaged targets file) gets its own, holding its own position.
+        assert e1.plate_id == 1005755001 and e1.fiber_map_key == "1005755001"
+        assert e3.plate_id == 1005755002
+        assert e4.plate_id == 1005755003 and e4.fiber_map_key == "1005755003"
+        assert e1.original_plate_id == e4.original_plate_id == e2.plate_id == 5099
 
         t = {x.fiber_id: x for x in e1.targets}
-        assert t[2].category == RETARGETED_CATEGORY and t[2].override_target == "VESTA"
-        assert t[2].sdss_id == -1 and t[2].original_category == "science" and t[2].override_id == "vesta"
-        assert t[2].twomass_designation == "2M00000002-0000000"  # original identity kept for provenance
+        # A solar-system body: reduced as science, no catalogue identity,
+        # sdss_id = solar_system_sdss_id, never cross-matched.
+        assert t[2].category == "science" and t[2].override_target == "VESTA"
+        assert t[2].override_kind == "solar_system"
+        assert t[2].sdss_id == 0 and t[2].original_category == "science" and t[2].override_id == "vesta"
+        assert t[2].twomass_designation == "" and t[2].catalogid == -1
+        assert t[2].ra != t[2].ra and t[2].dec != t[2].dec  # NaN: mock exposure has no raw header
         for f in (1, 3):
             assert t[f].category == OFF_TARGET_CATEGORY and t[f].sdss_id == -1 and t[f].override_id == "vesta"
         assert t[4].category == "sky_apogee" and t[4].override_id == ""
 
         t4 = {x.fiber_id: x for x in e4.targets}
-        assert t4[3].category == RETARGETED_CATEGORY and t4[3].override_target == "HD 1"
+        # A star: the row carries the star's targeting information, to be cross-matched.
+        assert t4[3].category == "science" and t4[3].override_target == "HD 1" and t4[3].override_id == "star"
+        assert t4[3].twomass_designation == "00050000+6748000" and (t4[3].ra, t4[3].dec) == (1.25, 67.8)
+        assert t4[3].sdss_id == -1 and t4[3].original_category == "science"
         assert t4[1].category == "science" and t4[1].sdss_id == 1001 and t4[1].override_id == ""
         assert "retarget_fibers(2=VESTA;others=offtarget)" == e1.override_actions
         assert not assigns_sdss_id(RETARGETED_CATEGORY)
@@ -241,6 +267,8 @@ class TestApply:
         assert exposures[2].config_id == 100 and exposures[2].override_actions == "use_previous_config(101->100)"
         assert exposures[3].config_id == 100 and exposures[3].override_actions == "use_config(101->100)"
         assert exposures[3].fiber_map_key == "100"
+        assert exposures[3].original_config_id == 101 and exposures[2].original_config_id == 101
+        assert exposures[0].original_config_id == 100
         assert exposures[0].config_id == 100 and exposures[0].override_ids == ""
 
     def test_use_previous_config_without_previous_fails(self):
@@ -257,8 +285,11 @@ class TestApply:
             write_models_to_hdf5_group(exposures, fp.create_group("exposures"))
             write_models_to_hdf5_group(exposures[1].targets, fp.create_group("fibers"))
             assert [x.decode() for x in fp["exposures/override_ids"][:]] == ["", "apo-55755-test"]
-            assert [x.decode() for x in fp["exposures/fiber_map_key"][:]] == ["5099", "5099.override.apo-55755-test"]
-            assert fp["fibers/category"][0].decode() == RETARGETED_CATEGORY
+            assert [x.decode() for x in fp["exposures/fiber_map_key"][:]] == ["5099", "1005755001"]
+            assert list(fp["exposures/plate_id"][:]) == [5099, 1005755001]
+            assert list(fp["exposures/original_plate_id"][:]) == [5099, 5099]
+            assert fp["fibers/category"][0].decode() == "science"
+            assert fp["fibers/override_kind"][0].decode() == "solar_system"
             assert fp["fibers/override_target"][0].decode() == "VESTA"
 
 

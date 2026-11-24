@@ -119,7 +119,7 @@ Parse hexdump output to extract header key-value pairs.
 **Returns:** List of extracted values
 
 #### `cross_match_targets(exposures, science_sequences, xmatch=True, only_assign_sdss_id_to_first_exposure_per_configuration=True)`
-Load the fiber-to-target mapping for the first exposure of each science sequence and, if `xmatch`, assign each target an `sdss_id` in place. Uses the targeted lookups (APOGEE IDs per night through the maintainers' table unless a full lookup is installed; catalogid, Gaia DR2 and 2MASS helpers), keeps the best-ranked row and breaks ties to the smallest `sdss_id`. Unplugged and off-target fibers keep `sdss_id = -1`. `get_almanac_data(..., fibers=True)` calls it before applying fiber overrides.
+Load the fiber-to-target mapping for the first exposure of each science sequence and, if `xmatch`, assign each target an `sdss_id` in place. Uses the targeted lookups (APOGEE IDs per night through the maintainers' table unless a full lookup is installed; catalogid, Gaia DR2 and 2MASS helpers), keeps the best-ranked row and breaks ties to the smallest `sdss_id`. Unplugged and off-target fibers keep `sdss_id = -1`. `get_almanac_data(..., fibers=True)` calls it after applying the fiber overrides (with `include_first_exposure_per_fiber_map_key=True` on override nights, so the per-exposure tables are cross-matched too). Solar-system bodies placed by an override keep the `sdss_id` set there.
 
 ## almanac.io
 
@@ -144,7 +144,7 @@ Delete HDF5 group/entry if it exists.
 - `group_name`: Name of entry to delete
 
 #### `write_fibers(fp, observatory, mjd, exposures, verbose=False)`
-Write the fiber-to-target mappings for one night to `raw/{observatory}/{mjd}/fibers/{key}`, one group per configuration (or plate); the key is `Exposure.fiber_map_key` (the configuration or plate ID, or an exposure's own key when an exposure override edits its fibers). Only exposures whose `targets` have been populated (see `almanac.apogee.cross_match_targets`) are written; existing groups for the same configuration are replaced.
+Write the fiber-to-target mappings for one night to `raw/{observatory}/{mjd}/fibers/{key}`, one group per configuration (or plate); the key is `Exposure.fiber_map_key` (the configuration or plate ID; an exposure override that edits fibers gives its exposure a synthetic ID, so its own table). Only exposures whose `targets` have been populated (see `almanac.apogee.cross_match_targets`) are written; existing groups for the same configuration are replaced.
 
 #### `_update_almanac(fp, exposures, sequence_indices, fiber_maps, compression=True, verbose=False)`
 Update HDF5 file with almanac data.

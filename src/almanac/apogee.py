@@ -1157,6 +1157,7 @@ def cross_match_targets(
     science_sequences,
     xmatch: bool = True,
     only_assign_sdss_id_to_first_exposure_per_configuration: bool = True,
+    include_first_exposure_per_fiber_map_key: bool = False,
 ) -> None:
     """
     Load the fiber-to-target mapping for the first exposure of each science
@@ -1169,9 +1170,11 @@ def cross_match_targets(
     The cross-match uses the targeted lookups (`catalogid_sdss_id_lookup`,
     `gaia_dr2_sdss_id_lookup`, `get_apogee_id_lookup`,
     `twomass_sdss_id_lookup`): the best-ranked row wins, ties broken to the
-    smallest `sdss_id` (`best_ranked_lookup`); APOGEE IDs are queried per night unless a full lookup was
-    installed. Targets whose category does not assign an `sdss_id`
-    (`assigns_sdss_id`: unplugged and off-target fibers) keep -1.
+    smallest `sdss_id` (`best_ranked_lookup`); APOGEE IDs are queried per
+    night unless a full lookup was installed. Targets whose category does not assign an `sdss_id`
+    (`assigns_sdss_id`: unplugged and off-target fibers) keep -1, and
+    solar-system bodies placed by an override keep the `sdss_id` set there
+    (`overrides.skip_cross_match`).
 
     :param exposures:
         The exposures for one observatory and MJD, in exposure-number order
@@ -1184,12 +1187,33 @@ def cross_match_targets(
     :param only_assign_sdss_id_to_first_exposure_per_configuration:
         If True (default), only assign `sdss_id` to the targets of the first
         exposure in each science sequence.
+    :param include_first_exposure_per_fiber_map_key:
+        Also cross-match the first object exposure of every fiber table that
+        will be written (`Exposure.fiber_map_key`), so that per-exposure
+        tables made by fiber overrides (applied before this call) are
+        cross-matched too. `get_almanac_data` sets it when the night has
+        overrides.
     """
-    identifiers = {}
-    # We only need to get targets for one exposure in each science sequence.
+    # The exposures whose target lists are cross-matched: one per science
+    # sequence (all of them, if requested), plus the first exposure of
+    # every fiber table that will be written (`fiber_map_key`), so that
+    # the edited per-exposure tables are cross-matched too.
+    xmatch_indices = []
     for si, ei in science_sequences:
-        exposure = exposures[si - 1]
-        for target in exposure.targets:
+        xmatch_indices.extend(
+            [si - 1] if only_assign_sdss_id_to_first_exposure_per_configuration else range(si - 1, ei)
+        )
+    if include_first_exposure_per_fiber_map_key:
+        first_of_key = {}
+        for i, e in enumerate(exposures):
+            if e.image_type == "object":
+                first_of_key.setdefault(e.fiber_map_key, i)
+        xmatch_indices.extend(first_of_key.values())
+    xmatch_indices = list(dict.fromkeys(xmatch_indices))
+
+    identifiers = {}
+    for i in xmatch_indices:
+        for target in exposures[i].targets:
             key, identifier = parse_target_identifier(target)
             identifiers.setdefault(key, set()).add(identifier)
 
@@ -1216,29 +1240,29 @@ def cross_match_targets(
                 lookup["twomass_psc"] = twomass_sdss_id_lookup(remaining)
 
         # Add sdss_id to targets
-        for si, ei in science_sequences:
-            iterable = [si - 1] if only_assign_sdss_id_to_first_exposure_per_configuration else range(si - 1, ei)
-            for i in iterable:
-                exposure = exposures[i]
-                for target in exposure.targets:
-                    if not assigns_sdss_id(target.category):
-                        # Don't assign sdss_id to unplugged targets, or to
-                        # off-target fibers: the positioner never reached
-                        # the assigned target, so whatever light the fiber
-                        # collected did not come from that source.
-                        continue
+        from almanac.overrides import skip_cross_match
+        for i in xmatch_indices:
+            exposure = exposures[i]
+            for target in exposure.targets:
+                if skip_cross_match(target):
+                    # A solar-system body placed on the fiber by an
+                    # override: its sdss_id was set there.
+                    continue
+                if not assigns_sdss_id(target.category):
+                    # Don't assign sdss_id to unplugged targets, or to
+                    # off-target fibers: the positioner never reached
+                    # the assigned target, so whatever light the fiber
+                    # collected did not come from that source.
+                    continue
 
-                    key, identifier = parse_target_identifier(target)
-                    if key == "coordinate":
-                        for lookup_key in ("apogee_id", "twomass_psc"):
-                            target.sdss_id = lookup[lookup_key].get(identifier, -1)
-                            if target.sdss_id != -1:
-                                break
-                    else:
-                        target.sdss_id = lookup[key].get(identifier, -1)
-
-                    #if target.sdss_id == -1 and (target.category not in ("sky_apogee", "unplugged")):
-                    #    print(f"{observatory} {mjd} Exposure {exposure.exposure}: Could not find SDSS ID for target {identifier} ({key}) {target}")
+                key, identifier = parse_target_identifier(target)
+                if key == "coordinate":
+                    for lookup_key in ("apogee_id", "twomass_psc"):
+                        target.sdss_id = lookup[lookup_key].get(identifier, -1)
+                        if target.sdss_id != -1:
+                            break
+                else:
+                    target.sdss_id = lookup[key].get(identifier, -1)
 
 
 def get_almanac_data(
@@ -1283,7 +1307,10 @@ def get_almanac_data(
         from almanac.overrides import overrides_for, apply_exposure_overrides
         night_overrides = overrides_for(observatory, mjd)
         if night_overrides:
-            # Before sequences: a configuration override changes `config_id`.
+            # Before sequences: a configuration override changes `config_id`,
+            # and an exposure whose fibers are edited gets its own fiber-table
+            # ID in `plate_id` / `config_id` (so it is not part of the plate's
+            # or configuration's visit).
             apply_exposure_overrides(exposures, night_overrides)
             logger.info(
                 f"{observatory}/{mjd}: applied exposure overrides "
@@ -1296,6 +1323,14 @@ def get_almanac_data(
         "missing": get_sequences(exposures, "missing", ()),
     }
     if fibers:
+        if night_overrides:
+            # BEFORE the cross-match: a retarget rewrites the targeting
+            # information of the fiber rows (from handplaced_targets.yaml)
+            # in a per-exposure copy of the fiber table, and the cross-match
+            # below then treats those rows exactly like plugged fibers.
+            from almanac.overrides import apply_fiber_overrides
+            apply_fiber_overrides(exposures, night_overrides)
+
         cross_match_targets(
             exposures,
             sequences["objects"],
@@ -1303,12 +1338,7 @@ def get_almanac_data(
             only_assign_sdss_id_to_first_exposure_per_configuration=(
                 only_assign_sdss_id_to_first_exposure_per_configuration
             ),
+            include_first_exposure_per_fiber_map_key=bool(night_overrides),
         )
-
-        if night_overrides:
-            # After sdss_id assignment, so the edited copies keep the
-            # cross-match of the fibers they do not change.
-            from almanac.overrides import apply_fiber_overrides
-            apply_fiber_overrides(exposures, night_overrides)
 
     return (observatory, mjd, exposures, sequences, missing)
