@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from pydantic.fields import (FieldInfo, ComputedFieldInfo)
 from pydantic_core import PydanticUndefined
 import datetime
+from contextlib import contextmanager
 from enum import Enum
 
 from almanac.data_models import Exposure
@@ -352,6 +353,82 @@ def write_missing_exposures(fp, rows, replace_keys=None):
         dataset = group.create_dataset(name, data=data)
         dataset.attrs["description"] = _MISSING_EXPOSURES_DESCRIPTIONS[name]
     return group
+
+
+@contextmanager
+def open_for_writing(path):
+    """
+    Open an almanac file for one short write session (``"a"`` mode), and
+    flush and close it at the end of the block.
+
+    The commands that build almanac files open their output only while they
+    write to it (one session per night, and one at the end), so that a run
+    killed outright (SIGKILL, out of memory) leaves a file that is readable up
+    to the last night written. Within a session the HDF5 metadata cache does
+    not evict (write) entries, so the file on disk is only changed in place
+    when the session is closed; the window in which a kill can damage the
+    file is the close itself. (A night that replaces one already in the file
+    can reuse the old night's space within the session, so a kill during that
+    session can damage that one night.)
+    """
+    fp = h5.File(path, "a")
+    try:
+        try:
+            config = fp.id.get_mdc_config()
+            config.evictions_enabled = False
+            config.incr_mode = 0  # H5C_incr__off: required to disable evictions
+            config.flash_incr_mode = 0
+            config.decr_mode = 0
+            fp.id.set_mdc_config(config)
+        except Exception:
+            pass
+        yield fp
+    finally:
+        fp.close()
+
+
+# Nights written to the file whose /missing_exposures rows are not recorded
+# yet ("obs/mjd"; written at the end of the run). A run that is killed leaves
+# them listed, and the next run with --skip-existing processes them again
+# instead of skipping them, so their missing-exposure rows are not lost.
+PENDING_MISSING_DATASET = "missing_exposures_pending"
+
+
+def _pending_key(observatory, mjd) -> bytes:
+    return f"{observatory}/{int(mjd)}".encode()
+
+
+def read_pending_missing(fp) -> set:
+    """The (observatory, mjd) pairs listed in /missing_exposures_pending."""
+    if PENDING_MISSING_DATASET not in fp:
+        return set()
+    keys = set()
+    for value in fp[PENDING_MISSING_DATASET][:]:
+        observatory, mjd = value.decode().split("/")
+        keys.add((observatory, int(mjd)))
+    return keys
+
+
+def add_pending_missing(fp, observatory, mjd) -> None:
+    """Append one night to /missing_exposures_pending (resizing it in place)."""
+    if PENDING_MISSING_DATASET not in fp:
+        fp.create_dataset(PENDING_MISSING_DATASET, shape=(0,), maxshape=(None,),
+                          dtype="S16", chunks=(256,))
+    dataset = fp[PENDING_MISSING_DATASET]
+    dataset.resize((len(dataset) + 1,))
+    dataset[-1] = _pending_key(observatory, mjd)
+
+
+def set_pending_missing(fp, keys) -> None:
+    """Replace /missing_exposures_pending by `keys`; remove it if empty."""
+    delete_hdf5_entry(fp, PENDING_MISSING_DATASET)
+    keys = sorted(keys)
+    if keys:
+        fp.create_dataset(
+            PENDING_MISSING_DATASET,
+            data=np.array([_pending_key(o, m) for o, m in keys], dtype="S16"),
+            maxshape=(None,), chunks=(256,),
+        )
 
 
 RUN_SUMMARY_GROUP = "run_summary"

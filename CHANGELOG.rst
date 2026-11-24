@@ -6,6 +6,16 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* Stopping a build no longer corrupts the output file. The main command and ``add fibers``
+  open the output only while writing it (one session per night, flushed and closed; HDF5
+  metadata-cache evictions disabled within a session), so a run killed with SIGKILL leaves
+  a file readable up to the last night written; workers are never forked while it is open
+  (they no longer hold its lock) and die with the main process (Linux
+  ``PR_SET_PDEATHSIG``). SIGTERM and SIGHUP are handled like SIGINT, and SIGINT is handled
+  in background jobs too (``almanac.signals``): workers are killed, processed nights
+  written, ``/missing_exposures`` and ``/run_summary`` written, exit status 128 + signal.
+  Nights written by a killed run are listed in ``/missing_exposures_pending`` and processed
+  again by the next ``--skip-existing`` run, so their missing-exposure rows are not lost.
 * Main command: end-of-run summary and exit status. Every run logs the number of nights
   requested, skipped by ``--skip-existing``, with data, without data, failed and built
   without the operations database, and lists the failed nights with a category

@@ -19,6 +19,7 @@ almanac/
 ├── overrides.py         # exposure overrides and hand-placed targets
 ├── io.py                # HDF5 writers and readers
 ├── writer.py            # background HDF5 writer thread
+├── signals.py           # clean stops on SIGINT/SIGTERM/SIGHUP
 ├── metadata.py          # `almanac add metadata`
 ├── catalog.py           # catalog queries behind /meta
 ├── qa.py                # known-bad exposure list
@@ -105,6 +106,14 @@ full_lookup)`; `lookup_attrs` are the `apogee_id_lookup_*` night attributes
 Write one night to an open HDF5 file: replaces `raw/<obs>/<mjd>/exposures` and
 `sequences`, and with `fibers` calls `write_fibers`. `write_almanac(output, results, ...)`
 writes a list of `get_almanac_data` results to a file.
+
+### `open_for_writing(path)`
+Context manager: open an almanac file in `"a"` mode for one write session (HDF5
+metadata-cache evictions disabled), flushed and closed at the end. The commands that build
+files write each night in its own session, so a killed run leaves a readable file.
+`read_pending_missing`, `add_pending_missing`, `set_pending_missing` maintain
+`/missing_exposures_pending`; `write_run_summary(fp, rows, attrs, replace_keys)` and
+`read_run_summary(fp)` the `/run_summary` group.
 
 ### `write_fibers(fp, observatory, mjd, exposures, verbose=False)`
 Write `raw/<obs>/<mjd>/fibers/<key>`, one group per `Exposure.fiber_map_key`, from the

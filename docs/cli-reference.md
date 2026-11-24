@@ -189,7 +189,27 @@ What can happen to a requested night, and the exit status:
 | Operations database not reachable for the expected exposures, cross-match requested (`--fibers` without `--no-x-match`) | yes (missing-exposures check incomplete) | warning, listed at the end | `db_unavailable` | **4** (if no night failed) |
 | Same, without the cross-match | yes | as above | `db_unavailable` | 0 |
 
+| Not reached because the run was stopped by a signal | no | summary count (`not processed`) | (none) | 128 + signal |
+
 Exit status 3 takes precedence over 4. Without `--output` the same statuses apply.
+
+### Stopping a run
+
+SIGINT (Ctrl-C), SIGTERM (`kill PID`, and what a Slurm time limit sends first) and SIGHUP
+stop a run cleanly: the worker processes are killed, the nights already processed are
+written (at most `max(4, 2 x --processes)` are queued), the missing-exposures table and run
+summary are written, and the exit status is 128 + the signal number (130, 143, 129).
+SIGINT works for background jobs too (a shell starts `&` jobs with SIGINT ignored; almanac
+handles it anyway); SIGHUP is left ignored under `nohup`. Re-run the same command with
+`--skip-existing` to continue.
+
+`kill -9` (SIGKILL, or the out-of-memory killer) cannot be handled. The output file is
+opened only while a night is written and is flushed and closed after every night, so it
+stays readable, up to the last night written; the worker processes die with the main
+process. Nights written by a killed run whose missing-exposure rows were not recorded yet
+are listed in `/missing_exposures_pending`, and the next run with `--skip-existing`
+processes them again instead of skipping them. (A kill while a night that replaces one
+already in the file is being written can damage that night; rebuild it.)
 
 ## `almanac add fibers`
 
@@ -225,7 +245,10 @@ every night in INPUT with an exposures table); `--output`/`-O`, `--in-place`;
 `--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes`/`-p` and
 `--query-workers` (as for `almanac`). There is no British-spelling alias for `add fibers`.
 
-**Exit status**: 1 if no night is selected, or if any night was refused or failed.
+**Exit status**: 1 if no night is selected, or if any night was refused or failed; 128 +
+the signal number when stopped by SIGINT, SIGTERM or SIGHUP (the nights already written are
+kept; each night is written, flushed and closed on its own, so a killed run leaves a
+readable file).
 
 ## `almanac add metadata`
 

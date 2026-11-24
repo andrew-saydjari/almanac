@@ -501,7 +501,12 @@ parallel datasets:
 | `db_unavailable` | Sentinel (`exposure = -1`) recording that the database could not be reached for this night, so trailing missing exposures are undetectable |
 
 Entries are refreshed per observatory/MJD pair on each run; pairs not processed in a run
-(skipped with `--skip-existing`, or failed) keep their previous entries. Exposures missing
+(skipped with `--skip-existing`, or failed) keep their previous entries. The table is
+written at the end of a run (also when it is stopped by a signal). After a run killed
+outright (`kill -9`), the nights it wrote whose rows were not recorded are listed in the
+`/missing_exposures_pending` dataset (strings `"obs/mjd"`); the next run with
+`--skip-existing` processes them again and removes the dataset. It is absent from a file
+whose last run ended normally. Exposures missing
 on disk also appear in `raw/{observatory}/{mjd}/exposures` with `image_type="missing"` so
 that exposure numbering stays dense.
 
@@ -529,6 +534,7 @@ successfully is removed), with the counts of the last run as attributes.
 | `last_run_n_no_data` | Processed, no exposure files on disk (nothing written) |
 | `last_run_n_failed` | Failed (not written) |
 | `last_run_n_db_unavailable` | Written without the operations database |
+| `last_run_n_not_processed` | Not reached because the run was stopped by a signal |
 | `last_run_exit_status` | Exit status of the run (see [exit status](cli-reference.md#fault-tolerance-and-exit-status)) |
 | `last_run_finished_utc` | When the run finished (UTC, ISO 8601) |
 | `last_run_almanac_version` | almanac version |

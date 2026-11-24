@@ -19,7 +19,11 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
     connection at once (see `almanac.parallel`).
     """
     from almanac import parallel
+    from almanac.signals import worker_signals
 
+    # Stopping is the parent's job (it kills the workers on a signal); a
+    # worker dies with its parent (Linux) rather than run on as an orphan.
+    worker_signals()
     parallel.install_db_gate(db_gate)
 
     from sdssdb.peewee.sdss5db import database
@@ -102,7 +106,7 @@ def _run_summary(counts, failed, db_unavailable_keys, exit_status):
     """Log the end-of-run summary (always): counts per category, failed nights."""
     from almanac import logger
 
-    problems = bool(failed or db_unavailable_keys)
+    problems = bool(failed or db_unavailable_keys or counts.get("not_processed"))
     log = logger.warning if problems or exit_status else logger.info
     log(
         "Run summary: "
@@ -271,210 +275,165 @@ def main(
     if not no_overrides:
         load_overrides()  # a malformed override file fails here, before any work
     override_attrs = overrides_attrs(not no_overrides)
-    with h5.File(output, "a") if output else nullcontext() as fp:
-        if skip_existing and output:
-            kept = []
-            for mjd, observatory in tasks:
-                if f"raw/{observatory}/{mjd}/exposures" in fp:
-                    display.completed[observatory].add(
-                        mjd - mjd_min + display.offset
+    from almanac import parallel
+    from almanac.signals import GracefulStop
+
+    # SIGINT, SIGTERM (`kill PID`, a Slurm time limit) and SIGHUP (unless
+    # ignored, as under nohup) stop the run cleanly: the workers are killed,
+    # the nights already processed are written (at most max(4, 2 x
+    # --processes) are queued), the
+    # missing-exposures table and run summary are written, and the exit
+    # status is 128 + the signal number. SIGINT is handled even when the
+    # shell started the job with SIGINT ignored (background jobs).
+    #
+    # The output file is opened only while something is written to it: for
+    # the --skip-existing check, once per night (flushed and closed), and at
+    # the end. Workers are never forked while it is open (they do not hold
+    # its descriptor or lock), and a run killed outright (SIGKILL) leaves a
+    # file that is readable up to the last night written; nights written
+    # whose missing-exposure rows were not recorded yet stay listed in
+    # /missing_exposures_pending and are processed again by the next run.
+    stop = GracefulStop()
+    interrupted = None  # the signal that stopped the run, if any
+    written_keys = set()  # (observatory, mjd) written to the output file
+    pending_before = set()  # nights left pending by an earlier run
+    writer = None
+
+    with stop:
+        try:
+            if output:
+                with io.open_for_writing(output) as fp:
+                    pending_before = io.read_pending_missing(fp)
+                    if skip_existing:
+                        kept = []
+                        for mjd, observatory in tasks:
+                            if (
+                                f"raw/{observatory}/{mjd}/exposures" in fp
+                                and (observatory, mjd) not in pending_before
+                            ):
+                                display.completed[observatory].add(
+                                    mjd - mjd_min + display.offset
+                                )
+                            else:
+                                kept.append((mjd, observatory))
+                        n_skipped = len(tasks) - len(kept)
+                        if n_skipped:
+                            logger.info(
+                                f"Skipping {n_skipped} observatory/MJD pairs already "
+                                f"present in {output}"
+                            )
+                        tasks = kept
+
+            processes_resolved = parallel.resolve_processes(processes, n_tasks=len(tasks))
+            query_workers_resolved = parallel.resolve_query_workers(query_workers)
+            processes = processes_resolved[0]
+            query_workers = query_workers_resolved[0]
+            # Each worker queries the database for every night (opsdb expected
+            # exposures; the cross-match with --fibers). Cap the connections they
+            # hold at once when there are more workers than query workers.
+            use_db_gate = processes > 1 and processes > query_workers
+            logger.info(
+                f"Parallelism: {parallel.describe(processes_resolved, query_workers_resolved)}; "
+                + (
+                    f"at most {query_workers} worker(s) hold a database connection at once"
+                    if use_db_gate
+                    else (
+                        "running in this process"
+                        if processes <= 1
+                        else f"each of the {processes} workers holds its own database connection"
                     )
-                else:
-                    kept.append((mjd, observatory))
-            n_skipped = len(tasks) - len(kept)
-            if n_skipped:
-                logger.info(
-                    f"Skipping {n_skipped} observatory/MJD pairs already "
-                    f"present in {output}"
-                )
-            tasks = kept
-
-        from almanac import parallel
-
-        processes_resolved = parallel.resolve_processes(processes, n_tasks=len(tasks))
-        query_workers_resolved = parallel.resolve_query_workers(query_workers)
-        processes = processes_resolved[0]
-        query_workers = query_workers_resolved[0]
-        # Each worker queries the database for every night (opsdb expected
-        # exposures; the cross-match with --fibers). Cap the connections they
-        # hold at once when there are more workers than query workers.
-        use_db_gate = processes > 1 and processes > query_workers
-        logger.info(
-            f"Parallelism: {parallel.describe(processes_resolved, query_workers_resolved)}; "
-            + (
-                f"at most {query_workers} worker(s) hold a database connection at once"
-                if use_db_gate
-                else (
-                    "running in this process"
-                    if processes <= 1
-                    else f"each of the {processes} workers holds its own database connection"
                 )
             )
-        )
 
-        # All HDF5 writes during the run go through a dedicated writer thread
-        # with a bounded queue, so the loop below can keep collecting worker
-        # results while the previous night is being written. h5py is not
-        # thread-safe: `fp` must not be touched by this thread until the
-        # writer is closed (the skip-existing reads above happen before the
-        # writer starts; the missing-exposures table is written after it is
-        # drained and closed).
-        writer = None
-        if output:
+            # All HDF5 writes during the run go through a dedicated writer thread
+            # with a bounded queue, so the loop below can keep collecting worker
+            # results while the previous night is being written. h5py is not
+            # thread-safe: this thread does not open the file again until the
+            # writer is closed.
+            if output:
 
-            def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
-                io.update(fp, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
-                # Overrides on/off, and which APOGEE ID -> SDSS ID source
-                # cross-matching used (shared with `add fibers`).
-                io.write_night_attrs(
-                    fp, observatory_w, mjd_w, override_attrs, lookup_attrs
-                )
+                def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
+                    with io.open_for_writing(output) as fp_w:
+                        io.update(fp_w, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
+                        # Overrides on/off, and which APOGEE ID -> SDSS ID source
+                        # cross-matching used (shared with `add fibers`).
+                        io.write_night_attrs(
+                            fp_w, observatory_w, mjd_w, override_attrs, lookup_attrs
+                        )
+                        io.add_pending_missing(fp_w, observatory_w, mjd_w)
+                    written_keys.add((observatory_w, mjd_w))
 
-            def _on_write_error(item, exception):
-                observatory_w, mjd_w = item[:2]
-                logger.error(f"Failed to write {observatory_w}/{mjd_w}: {exception}")
-                failed.append((observatory_w, mjd_w, "write_failed", str(exception)))
+                def _on_write_error(item, exception):
+                    observatory_w, mjd_w = item[:2]
+                    logger.error(f"Failed to write {observatory_w}/{mjd_w}: {exception}")
+                    failed.append((observatory_w, mjd_w, "write_failed", str(exception)))
 
-            writer = QueueWriter(
-                _write_night,
-                maxsize=max(4, 2 * (processes or 1)),
-                on_error=_on_write_error,
-            ).start()
+                writer = QueueWriter(
+                    _write_night,
+                    maxsize=max(4, 2 * (processes or 1)),
+                    on_error=_on_write_error,
+                ).start()
 
-        # Decide once, in this process, whether APOGEE ID lookups read the
-        # materialized view or run the live join (and, opt-in, build the full
-        # lookup); record the choice per night. Shared with `add fibers`.
-        apogee_id_source, lookup_attrs, full_lookup = apogee.prepare_cross_match(
-            bool(fibers and not no_x_match and tasks),
-            live_apogee_id_join=live_apogee_id_join,
-            full_apogee_id_lookup=full_apogee_id_lookup,
-        )
+            # Decide once, in this process, whether APOGEE ID lookups read the
+            # materialized view or run the live join (and, opt-in, build the full
+            # lookup); record the choice per night. Shared with `add fibers`.
+            apogee_id_source, lookup_attrs, full_lookup = apogee.prepare_cross_match(
+                bool(fibers and not no_x_match and tasks),
+                live_apogee_id_join=live_apogee_id_join,
+                full_apogee_id_lookup=full_apogee_id_lookup,
+            )
 
-        with context_manager as live:
-            if processes > 1:
+            with context_manager as live:
+                if processes > 1:
 
-                # Parallel
-                import os
-                import sys
-                import signal
-                import multiprocessing
-                import concurrent.futures
-                from concurrent.futures.process import BrokenProcessPool
+                    # Parallel
+                    import os
+                    import sys
+                    import signal
+                    import multiprocessing
+                    import concurrent.futures
+                    from concurrent.futures.process import BrokenProcessPool
 
-                mp_context = multiprocessing.get_context()
-                db_gate = (
-                    mp_context.BoundedSemaphore(query_workers) if use_db_gate else None
-                )
-                if "almanac.database" in sys.modules:
-                    # The parent is done with the database (lookup-source
-                    # probe, optional full lookup): close its connection so
-                    # it neither counts against the database nor is shared
-                    # with forked workers.
-                    try:
-                        sys.modules["almanac.database"].database.close()
-                    except Exception:
-                        pass
-
-                # With --full-apogee-id-lookup, ship the parent-built full
-                # lookup to every worker through the pool initializer, so no
-                # worker re-runs the heavy query. Otherwise each worker
-                # queries (and memoises) only the APOGEE IDs its nights need.
-                initargs = (full_lookup, apogee_id_source, db_gate)
-                # With the gate, a worker frees its database slot (closing
-                # its connection) when it finishes a night.
-                task_fn = (
-                    functools.partial(
-                        parallel.run_task_releasing_db_slot, apogee.get_almanac_data
+                    mp_context = multiprocessing.get_context()
+                    db_gate = (
+                        mp_context.BoundedSemaphore(query_workers) if use_db_gate else None
                     )
-                    if use_db_gate
-                    else apogee.get_almanac_data
-                )
+                    if "almanac.database" in sys.modules:
+                        # The parent is done with the database (lookup-source
+                        # probe, optional full lookup): close its connection so
+                        # it neither counts against the database nor is shared
+                        # with forked workers.
+                        try:
+                            sys.modules["almanac.database"].database.close()
+                        except Exception:
+                            pass
 
-                with concurrent.futures.ProcessPoolExecutor(
-                    max_workers=processes,
-                    initializer=_pool_initializer,
-                    initargs=initargs,
-                    mp_context=mp_context,
-                ) as pool:
+                    # With --full-apogee-id-lookup, ship the parent-built full
+                    # lookup to every worker through the pool initializer, so no
+                    # worker re-runs the heavy query. Otherwise each worker
+                    # queries (and memoises) only the APOGEE IDs its nights need.
+                    initargs = (full_lookup, apogee_id_source, db_gate)
+                    # With the gate, a worker frees its database slot (closing
+                    # its connection) when it finishes a night.
+                    task_fn = (
+                        functools.partial(
+                            parallel.run_task_releasing_db_slot, apogee.get_almanac_data
+                        )
+                        if use_db_gate
+                        else apogee.get_almanac_data
+                    )
 
-                    task_iter = iter(tasks)
-                    try:
+                    with concurrent.futures.ProcessPoolExecutor(
+                        max_workers=processes,
+                        initializer=_pool_initializer,
+                        initargs=initargs,
+                        mp_context=mp_context,
+                    ) as pool:
+
+                        task_iter = iter(tasks)
                         futures = {}  # future -> (mjd, observatory)
-                        for n, (mjd, observatory) in enumerate(task_iter, start=1):
-                            futures[
-                                pool.submit(
-                                    task_fn,
-                                    observatory,
-                                    mjd,
-                                    fibers,
-                                    not no_x_match,
-                                    overrides=not no_overrides,
-                                )
-                            ] = (mjd, observatory)
-                            if n == processes:
-                                break
-
-                        t = time()
-                        while len(futures) > 0:
-
-                            future = next(concurrent.futures.as_completed(futures))
-                            mjd, observatory = futures.pop(future)
-                            v = mjd - mjd_min + display.offset
-
-                            try:
-                                observatory, mjd, exposures, sequences, missing = (
-                                    result
-                                ) = future.result()
-                            except KeyboardInterrupt:
-                                raise
-                            except BrokenProcessPool:
-                                failed.append(
-                                    (observatory, mjd, "pool_broken", "process pool broken")
-                                )
-                                raise
-                            except Exception as e:
-                                # Per-MJD fault isolation: record and continue.
-                                logger.exception(
-                                    f"Failed to process {observatory}/{mjd}: {e}"
-                                )
-                                failed.append(
-                                    (observatory, mjd, _failure_category(e), str(e))
-                                )
-                            else:
-                                processed_keys.add((observatory, mjd))
-                                missing_rows.extend(missing)
-
-                                if any(
-                                    e.image_type == "missing" for e in exposures
-                                ):
-                                    display.missing.add(v)
-
-                                if not exposures:
-                                    display.no_data[observatory].add(v)
-                                    no_data_keys.add((observatory, mjd))
-                                else:
-                                    display.completed[observatory].add(v)
-                                    results.append(result)
-                                    if writer is not None:
-                                        writer.submit(
-                                            observatory,
-                                            mjd,
-                                            exposures,
-                                            sequences,
-                                        )
-
-                            if (
-                                live is not None
-                                and (time() - t) > 1 / refresh_per_second
-                            ):
-                                live.update(display.create_display())
-                                t = time()
-
-                            try:
-                                mjd, observatory = next(task_iter)
-                            except StopIteration:
-                                None
-                            else:
+                        try:
+                            for n, (mjd, observatory) in enumerate(task_iter, start=1):
                                 futures[
                                     pool.submit(
                                         task_fn,
@@ -485,131 +444,227 @@ def main(
                                         overrides=not no_overrides,
                                     )
                                 ] = (mjd, observatory)
+                                if n == processes:
+                                    break
 
-                    except BrokenProcessPool as e:
-                        # The pool cannot recover; mark everything outstanding
-                        # as failed but continue so the missing-exposures table
-                        # and failure report are still written.
-                        logger.error(f"Process pool broke: {e}")
-                        for mjd_o, obs_o in futures.values():
-                            failed.append((obs_o, mjd_o, "pool_broken", "process pool broken"))
-                        for mjd_o, obs_o in task_iter:
-                            failed.append((obs_o, mjd_o, "pool_broken", "process pool broken"))
-                    except KeyboardInterrupt:
-                        for pid in pool._processes:
-                            os.kill(pid, signal.SIGKILL)
-                        pool.shutdown(wait=False, cancel_futures=True)
-                        if writer is not None:
-                            # Let any in-flight write finish (so the file is
-                            # not truncated mid-write), drop queued nights.
-                            writer.close(drain=False)
+                            t = time()
+                            while len(futures) > 0:
+
+                                future = next(concurrent.futures.as_completed(futures))
+                                mjd, observatory = futures.pop(future)
+                                v = mjd - mjd_min + display.offset
+
+                                try:
+                                    observatory, mjd, exposures, sequences, missing = (
+                                        result
+                                    ) = future.result()
+                                except KeyboardInterrupt:
+                                    raise
+                                except BrokenProcessPool:
+                                    failed.append(
+                                        (observatory, mjd, "pool_broken", "process pool broken")
+                                    )
+                                    raise
+                                except Exception as e:
+                                    # Per-MJD fault isolation: record and continue.
+                                    logger.exception(
+                                        f"Failed to process {observatory}/{mjd}: {e}"
+                                    )
+                                    failed.append(
+                                        (observatory, mjd, _failure_category(e), str(e))
+                                    )
+                                else:
+                                    processed_keys.add((observatory, mjd))
+                                    missing_rows.extend(missing)
+
+                                    if any(
+                                        e.image_type == "missing" for e in exposures
+                                    ):
+                                        display.missing.add(v)
+
+                                    if not exposures:
+                                        display.no_data[observatory].add(v)
+                                        no_data_keys.add((observatory, mjd))
+                                    else:
+                                        display.completed[observatory].add(v)
+                                        results.append(result)
+                                        if writer is not None:
+                                            writer.submit(
+                                                observatory,
+                                                mjd,
+                                                exposures,
+                                                sequences,
+                                            )
+
+                                if (
+                                    live is not None
+                                    and (time() - t) > 1 / refresh_per_second
+                                ):
+                                    live.update(display.create_display())
+                                    t = time()
+
+                                try:
+                                    mjd, observatory = next(task_iter)
+                                except StopIteration:
+                                    None
+                                else:
+                                    futures[
+                                        pool.submit(
+                                            task_fn,
+                                            observatory,
+                                            mjd,
+                                            fibers,
+                                            not no_x_match,
+                                            overrides=not no_overrides,
+                                        )
+                                    ] = (mjd, observatory)
+
+                        except BrokenProcessPool as e:
+                            # The pool cannot recover; mark everything outstanding
+                            # as failed but continue so the missing-exposures table
+                            # and failure report are still written.
+                            logger.error(f"Process pool broke: {e}")
+                            for mjd_o, obs_o in futures.values():
+                                failed.append((obs_o, mjd_o, "pool_broken", "process pool broken"))
+                            for mjd_o, obs_o in task_iter:
+                                failed.append((obs_o, mjd_o, "pool_broken", "process pool broken"))
+                        except KeyboardInterrupt:
+                            with stop.deferred():
+                                for pid in list(pool._processes):
+                                    try:
+                                        os.kill(pid, signal.SIGKILL)
+                                    except OSError:
+                                        pass
+                                pool.shutdown(wait=False, cancel_futures=True)
+                            raise
+                else:
+                    t = time()
+                    for mjd, observatory in tasks:
+                        v = mjd - mjd_min + display.offset
                         try:
-                            fp.close()
-                        except:
-                            None
-                        raise KeyboardInterrupt
-            else:
-                t = time()
-                for mjd, observatory in tasks:
-                    v = mjd - mjd_min + display.offset
-                    try:
-                        (
-                            observatory, mjd, exposures, sequences, missing
-                        ) = result = apogee.get_almanac_data(
-                            observatory, mjd, fibers, not no_x_match,
-                            overrides=not no_overrides,
-                        )
-                    except KeyboardInterrupt:
-                        if writer is not None:
-                            writer.close(drain=False)
-                        raise
-                    except Exception as e:
-                        # Per-MJD fault isolation: record and continue.
-                        logger.exception(
-                            f"Failed to process {observatory}/{mjd}: {e}"
-                        )
-                        failed.append((observatory, mjd, _failure_category(e), str(e)))
-                    else:
-                        processed_keys.add((observatory, mjd))
-                        missing_rows.extend(missing)
-
-                        if any(e.image_type == "missing" for e in exposures):
-                            display.missing.add(v)
-
-                        if not exposures:
-                            display.no_data[observatory].add(v)
-                            no_data_keys.add((observatory, mjd))
+                            (
+                                observatory, mjd, exposures, sequences, missing
+                            ) = result = apogee.get_almanac_data(
+                                observatory, mjd, fibers, not no_x_match,
+                                overrides=not no_overrides,
+                            )
+                        except KeyboardInterrupt:
+                            raise
+                        except Exception as e:
+                            # Per-MJD fault isolation: record and continue.
+                            logger.exception(
+                                f"Failed to process {observatory}/{mjd}: {e}"
+                            )
+                            failed.append((observatory, mjd, _failure_category(e), str(e)))
                         else:
-                            display.completed[observatory].add(v)
-                            results.append(result)
-                            if writer is not None:
-                                writer.submit(
-                                    observatory,
-                                    mjd,
-                                    exposures,
-                                    sequences,
-                                )
+                            processed_keys.add((observatory, mjd))
+                            missing_rows.extend(missing)
 
-                    if live is not None and (time() - t) > 1 / refresh_per_second:
-                        live.update(display.create_display())
-                        t = time()
+                            if any(e.image_type == "missing" for e in exposures):
+                                display.missing.add(v)
 
-            if live is not None:
-                live.update(display.create_display())
-                if verbosity <= 1 and output is None:
-                    sleep(3)
+                            if not exposures:
+                                display.no_data[observatory].add(v)
+                                no_data_keys.add((observatory, mjd))
+                            else:
+                                display.completed[observatory].add(v)
+                                results.append(result)
+                                if writer is not None:
+                                    writer.submit(
+                                        observatory,
+                                        mjd,
+                                        exposures,
+                                        sequences,
+                                    )
 
-        if writer is not None:
-            # Drain all queued nights and stop the writer thread before this
-            # thread touches `fp` again.
-            writer.close(drain=True)
+                        if live is not None and (time() - t) > 1 / refresh_per_second:
+                            live.update(display.create_display())
+                            t = time()
 
-        # End-of-run accounting (see `_run_exit_status`).
-        failed_keys = {(o, m) for o, m, _, _ in failed}
-        db_unavailable_keys = {
-            (r["observatory"], r["mjd"]) for r in missing_rows
-            if r["reason"] == "db_unavailable"
-        } - failed_keys
-        cross_match_requested = bool(fibers and not no_x_match)
-        exit_status = _run_exit_status(failed, db_unavailable_keys, cross_match_requested)
-        counts = dict(
-            requested=n_requested,
-            skipped_existing=n_skipped,
-            with_data=len(processed_keys - no_data_keys - failed_keys),
-            no_data=len(no_data_keys),
-            failed=len(failed_keys),
-            db_unavailable=len(db_unavailable_keys),
-        )
+                if live is not None:
+                    live.update(display.create_display())
+                    if verbosity <= 1 and output is None:
+                        sleep(3)
 
-        if output:
-            # Run-level missing-exposures table. Entries from previous runs
-            # for (observatory, mjd) pairs not processed here (skipped or
-            # failed) are preserved.
-            io.write_missing_exposures(fp, missing_rows, replace_keys=processed_keys)
-            # Nights with a problem (accumulated over runs into this file)
-            # and the counts of this run, so a build can be audited later.
-            from datetime import datetime, timezone
-            from almanac import __version__
-
-            summary_rows = [
-                dict(observatory=o, mjd=m, category=c, message=msg)
-                for o, m, c, msg in failed
-            ] + [
-                dict(observatory=o, mjd=m, category="db_unavailable", message="")
-                for o, m in sorted(db_unavailable_keys)
-            ]
-            io.write_run_summary(
-                fp,
-                summary_rows,
-                attrs={
-                    **{f"last_run_n_{k}": v for k, v in counts.items()},
-                    "last_run_exit_status": exit_status,
-                    "last_run_finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    "last_run_almanac_version": __version__,
-                    "last_run_cross_match": cross_match_requested,
-                },
-                replace_keys=processed_keys | failed_keys,
+        except KeyboardInterrupt as e:
+            # Includes almanac.signals.StopRequested (SIGINT/SIGTERM/SIGHUP).
+            import signal as _signal
+            interrupted = getattr(e, "signum", _signal.SIGINT)
+            logger.warning(
+                f"Stopped by signal {interrupted}: writing the nights already processed, "
+                "the missing-exposures table and the run summary"
             )
+
+        with stop.deferred():
+            if writer is not None:
+                # Write all queued nights (also when stopped by a signal: they
+                # are already processed, and the queue is short) and stop the
+                # writer thread before this thread opens the file again.
+                writer.close(drain=True)
+
+            # End-of-run accounting (see `_run_exit_status`).
+            failed_keys = {(o, m) for o, m, _, _ in failed}
+            # Nights whose missing-exposure rows are recorded now: those written
+            # to the file and those without data (a night whose write failed
+            # or was dropped by a stop keeps its previous rows).
+            done_keys = (written_keys if output else processed_keys - no_data_keys) | no_data_keys
+            done_missing_rows = [
+                r for r in missing_rows if (r["observatory"], r["mjd"]) in done_keys
+            ]
+            db_unavailable_keys = {
+                (r["observatory"], r["mjd"]) for r in done_missing_rows
+                if r["reason"] == "db_unavailable"
+            } - failed_keys
+            cross_match_requested = bool(fibers and not no_x_match)
+            exit_status = _run_exit_status(failed, db_unavailable_keys, cross_match_requested)
+            if interrupted is not None:
+                exit_status = 128 + int(interrupted)
+            counts = dict(
+                requested=n_requested,
+                skipped_existing=n_skipped,
+                with_data=len(done_keys - no_data_keys - failed_keys),
+                no_data=len(no_data_keys),
+                failed=len(failed_keys),
+                db_unavailable=len(db_unavailable_keys),
+                not_processed=max(
+                    0, n_requested - n_skipped - len(done_keys | failed_keys)
+                ),
+            )
+
+            if output:
+                from datetime import datetime, timezone
+                from almanac import __version__
+
+                with io.open_for_writing(output) as fp:
+                    # Run-level missing-exposures table. Entries from previous
+                    # runs for (observatory, mjd) pairs not done here (skipped,
+                    # failed, not reached) are preserved.
+                    io.write_missing_exposures(fp, done_missing_rows, replace_keys=done_keys)
+                    io.set_pending_missing(
+                        fp, (pending_before | written_keys) - done_keys
+                    )
+                    # Nights with a problem (accumulated over runs into this
+                    # file) and the counts of this run, so a build can be
+                    # audited later.
+                    summary_rows = [
+                        dict(observatory=o, mjd=m, category=c, message=msg)
+                        for o, m, c, msg in failed
+                    ] + [
+                        dict(observatory=o, mjd=m, category="db_unavailable", message="")
+                        for o, m in sorted(db_unavailable_keys)
+                    ]
+                    io.write_run_summary(
+                        fp,
+                        summary_rows,
+                        attrs={
+                            **{f"last_run_n_{k}": v for k, v in counts.items()},
+                            "last_run_exit_status": exit_status,
+                            "last_run_finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "last_run_almanac_version": __version__,
+                            "last_run_cross_match": cross_match_requested,
+                        },
+                        replace_keys=done_keys | failed_keys,
+                    )
 
     if verbosity >= 2:
         for observatory, mjd, exposures, sequences, _missing in results:
@@ -970,9 +1025,11 @@ def fibers(
     )
 
     failed, refused, done = [], [], []
-    with h5.File(target, "a") as fp:
 
-        def _write(observatory, mjd, exposures, sequences):
+    def _write(observatory, mjd, exposures, sequences):
+        # One write session per night, flushed and closed (see
+        # `io.open_for_writing`): a killed run leaves a readable file.
+        with io.open_for_writing(target) as fp:
             group = fp[f"raw/{observatory}/{mjd}/exposures"]
             differences = io.compare_exposures(group, exposures)
             differences += io.compare_sequences(fp, observatory, mjd, sequences)
@@ -990,52 +1047,87 @@ def fibers(
                 fp, observatory, mjd, override_attrs, lookup_attrs,
                 clear_stale_lookup_attrs=True,
             )
-            done.append((observatory, mjd))
+        done.append((observatory, mjd))
 
-        def _args(observatory, mjd):
-            return (observatory, mjd, io.read_exposures(fp, observatory, mjd), xmatch, not no_overrides)
+    # Read every night's stored exposures up front, with the file closed again
+    # before any worker is forked (workers never hold its descriptor or lock).
+    with h5.File(target, "r") as fp:
+        task_args = [
+            (observatory, mjd, io.read_exposures(fp, observatory, mjd), xmatch, not no_overrides)
+            for observatory, mjd in nights
+        ]
 
-        if processes > 1:
-            mp_context = multiprocessing.get_context()
-            db_gate = mp_context.BoundedSemaphore(query_workers) if use_db_gate else None
-            if "almanac.database" in sys.modules:
-                try:
-                    sys.modules["almanac.database"].database.close()
-                except Exception:
-                    pass
-            task_fn = (
-                functools.partial(parallel.run_task_releasing_db_slot, _add_fibers_task)
-                if use_db_gate else _add_fibers_task
-            )
-            with concurrent.futures.ProcessPoolExecutor(
-                max_workers=processes,
-                initializer=_pool_initializer,
-                initargs=(full_lookup, apogee_id_source, db_gate),
-                mp_context=mp_context,
-            ) as pool:
-                futures = {
-                    pool.submit(task_fn, *_args(o, m)): (o, m) for o, m in nights
-                }
-                for future in concurrent.futures.as_completed(futures):
-                    observatory, mjd = futures[future]
+    from almanac.signals import GracefulStop
+
+    # SIGINT/SIGTERM/SIGHUP: kill the workers, keep the nights already
+    # written, exit with 128 + the signal number (see `almanac.signals`).
+    stop = GracefulStop()
+    interrupted = None
+    with stop:
+        try:
+            if processes > 1:
+                mp_context = multiprocessing.get_context()
+                db_gate = mp_context.BoundedSemaphore(query_workers) if use_db_gate else None
+                if "almanac.database" in sys.modules:
                     try:
-                        _write(*future.result())
+                        sys.modules["almanac.database"].database.close()
+                    except Exception:
+                        pass
+                task_fn = (
+                    functools.partial(parallel.run_task_releasing_db_slot, _add_fibers_task)
+                    if use_db_gate else _add_fibers_task
+                )
+                with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=processes,
+                    initializer=_pool_initializer,
+                    initargs=(full_lookup, apogee_id_source, db_gate),
+                    mp_context=mp_context,
+                ) as pool:
+                    try:
+                        futures = {
+                            pool.submit(task_fn, *args): args[:2] for args in task_args
+                        }
+                        for future in concurrent.futures.as_completed(futures):
+                            observatory, mjd = futures[future]
+                            try:
+                                _write(*future.result())
+                            except KeyboardInterrupt:
+                                raise
+                            except Exception as e:
+                                logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
+                                failed.append((observatory, mjd, str(e)))
+                    except KeyboardInterrupt:
+                        import signal as _signal
+                        with stop.deferred():
+                            for pid in list(pool._processes):
+                                try:
+                                    os.kill(pid, _signal.SIGKILL)
+                                except OSError:
+                                    pass
+                            pool.shutdown(wait=False, cancel_futures=True)
+                        raise
+            else:
+                for args in task_args:
+                    observatory, mjd = args[:2]
+                    try:
+                        _write(*_add_fibers_task(*args))
+                    except KeyboardInterrupt:
+                        raise
                     except Exception as e:
                         logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
                         failed.append((observatory, mjd, str(e)))
-        else:
-            for observatory, mjd in nights:
-                try:
-                    _write(*_add_fibers_task(*_args(observatory, mjd)))
-                except Exception as e:
-                    logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
-                    failed.append((observatory, mjd, str(e)))
+        except KeyboardInterrupt as e:
+            import signal as _signal
+            interrupted = getattr(e, "signum", _signal.SIGINT)
+            logger.warning(f"Stopped by signal {interrupted}; the nights already written are kept")
 
     logger.info(f"Added fiber mappings for {len(done)} of {len(nights)} nights in {target}")
     for observatory, mjd, differences in refused:
         logger.warning(f"  refused {observatory}/{mjd}: {'; '.join(differences)}")
     for observatory, mjd, message in failed:
         logger.warning(f"  failed {observatory}/{mjd}: {message}")
+    if interrupted is not None:
+        sys.exit(128 + int(interrupted))
     if refused or failed:
         sys.exit(1)
 

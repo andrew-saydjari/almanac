@@ -116,6 +116,14 @@ almanac.retry module
    :undoc-members:
    :show-inheritance:
 
+almanac.signals module
+----------------------
+
+.. automodule:: almanac.signals
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 almanac.utils module
 --------------------
 
