@@ -131,7 +131,7 @@ almanac add metadata survey.h5
 almanac add metadata survey.h5 --query-workers 4   # be gentle on remote tunnels
 ```
 
-By default all MJDs in the file are processed; restrict with `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, or `--apo`/`--lco`.
+By default all MJDs in the file are processed; restrict with `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, or `--apo`/`--lco`. If the file has no fiber mappings for the selected nights, the command exits with status 1 without writing anything: build the file with `--fibers` first.
 
 > **Run `add metadata` database-local.** Throughput is dominated by database locality and cache state: a full-survey pass (~4.7M unique `sdss_id`s) ran at ~660 ids/s cold (~2h15m) even with the database on the local network, versus 13--26k ids/s on small warm slices. Through an SSH tunnel the same pass is impractically slow. Run it at Utah (or wherever is network-local to the SDSS database), and budget RAM for the held result set (~18 GB for ~4.7M sources).
 

@@ -1152,6 +1152,119 @@ def parse_target_identifier(target):
             return ("coordinate", designation)
 
 
+def cross_match_targets(
+    exposures: List[Exposure],
+    science_sequences,
+    xmatch: bool = True,
+    only_assign_sdss_id_to_first_exposure_per_configuration: bool = True,
+    include_first_exposure_per_fiber_map_key: bool = False,
+) -> None:
+    """
+    Load the fiber-to-target mapping for the first exposure of each science
+    sequence and, optionally, cross-match those targets with the SDSS-V
+    database to assign each one an `sdss_id`.
+
+    The targets are read from the confSummary (FPS era) or plugmap (plate era)
+    files for the exposure. This mutates the given exposures in place.
+
+    The cross-match uses the targeted lookups (`catalogid_sdss_id_lookup`,
+    `gaia_dr2_sdss_id_lookup`, `get_apogee_id_lookup`,
+    `twomass_sdss_id_lookup`): the best-ranked row wins, ties broken to the
+    smallest `sdss_id` (`best_ranked_lookup`); APOGEE IDs are queried per
+    night unless a full lookup was installed. Targets whose category does not assign an `sdss_id`
+    (`assigns_sdss_id`: unplugged and off-target fibers) keep -1, and
+    solar-system bodies placed by an override keep the `sdss_id` set there
+    (`overrides.skip_cross_match`).
+
+    :param exposures:
+        The exposures for one observatory and MJD, in exposure-number order
+        (i.e. `exposures[i].exposure == i + 1`).
+    :param science_sequences:
+        (start, end) pairs of 1-indexed exposure numbers for each science
+        sequence, as returned by `get_science_sequences`.
+    :param xmatch:
+        Whether to cross-match targets with the database to assign `sdss_id`.
+    :param only_assign_sdss_id_to_first_exposure_per_configuration:
+        If True (default), only assign `sdss_id` to the targets of the first
+        exposure in each science sequence.
+    :param include_first_exposure_per_fiber_map_key:
+        Also cross-match the first object exposure of every fiber table that
+        will be written (`Exposure.fiber_map_key`), so that per-exposure
+        tables made by fiber overrides (applied before this call) are
+        cross-matched too. `get_almanac_data` sets it when the night has
+        overrides.
+    """
+    # The exposures whose target lists are cross-matched: one per science
+    # sequence (all of them, if requested), plus the first exposure of
+    # every fiber table that will be written (`fiber_map_key`), so that
+    # the edited per-exposure tables are cross-matched too.
+    xmatch_indices = []
+    for si, ei in science_sequences:
+        xmatch_indices.extend(
+            [si - 1] if only_assign_sdss_id_to_first_exposure_per_configuration else range(si - 1, ei)
+        )
+    if include_first_exposure_per_fiber_map_key:
+        first_of_key = {}
+        for i, e in enumerate(exposures):
+            if e.image_type == "object":
+                first_of_key.setdefault(e.fiber_map_key, i)
+        xmatch_indices.extend(first_of_key.values())
+    xmatch_indices = list(dict.fromkeys(xmatch_indices))
+
+    identifiers = {}
+    for i in xmatch_indices:
+        for target in exposures[i].targets:
+            key, identifier = parse_target_identifier(target)
+            identifiers.setdefault(key, set()).add(identifier)
+
+    if xmatch:
+        # We will often run `get_almanac_data` in parallel (through multiple processes),
+        # so here we are avoiding opening a database connection until the child process starts.
+        from almanac.database import is_database_available, catalogdb
+
+        lookup = {}
+        if "catalogid" in identifiers and is_database_available:
+            lookup["catalogid"] = catalogid_sdss_id_lookup(identifiers["catalogid"])
+
+        if "gaia_dr2" in identifiers and is_database_available:
+            lookup["gaia_dr2"] = gaia_dr2_sdss_id_lookup(identifiers["gaia_dr2"])
+
+        if "coordinate" in identifiers and is_database_available:
+            # Query only the APOGEE IDs this night needs (memoised per
+            # process), unless a full lookup was installed.
+            lookup["apogee_id"] = get_apogee_id_lookup(identifiers["coordinate"])
+            remaining = set(identifiers["coordinate"]).difference(lookup["apogee_id"].keys())
+
+            if remaining:
+                # For remaining things, check 2MASS.
+                lookup["twomass_psc"] = twomass_sdss_id_lookup(remaining)
+
+        # Add sdss_id to targets
+        from almanac.overrides import skip_cross_match
+        for i in xmatch_indices:
+            exposure = exposures[i]
+            for target in exposure.targets:
+                if skip_cross_match(target):
+                    # A solar-system body placed on the fiber by an
+                    # override: its sdss_id was set there.
+                    continue
+                if not assigns_sdss_id(target.category):
+                    # Don't assign sdss_id to unplugged targets, or to
+                    # off-target fibers: the positioner never reached
+                    # the assigned target, so whatever light the fiber
+                    # collected did not come from that source.
+                    continue
+
+                key, identifier = parse_target_identifier(target)
+                if key == "coordinate":
+                    for lookup_key in ("apogee_id", "twomass_psc"):
+                        target.sdss_id = lookup[lookup_key].get(identifier, -1)
+                        if target.sdss_id != -1:
+                            break
+                else:
+                    target.sdss_id = lookup[key].get(identifier, -1)
+
+
 def get_almanac_data(
     observatory: str,
     mjd: int,
@@ -1169,13 +1282,14 @@ def get_almanac_data(
         The Modified Julian Date.
     :param fibers:
         Whether to include fiber mapping information.
-    :param xmatch:
-        Whether to perform cross-matching with catalog database.
+    :param meta:
+        Whether to cross-match the fiber targets with the catalog database to
+        assign `sdss_id` values (ignored unless `fibers` is True).
+    :param only_assign_sdss_id_to_first_exposure_per_configuration:
+        See `cross_match_targets`.
     :param overrides: [optional]
         Apply the exposure overrides in `almanac/etc/exposure_overrides.yaml`
         (see `almanac.overrides`). This is the only place they are applied.
-    :param kwargs:
-        Additional keyword arguments passed to other functions.
 
     :returns:
         Tuple containing:
@@ -1217,74 +1331,14 @@ def get_almanac_data(
             from almanac.overrides import apply_fiber_overrides
             apply_fiber_overrides(exposures, night_overrides)
 
-        # The exposures whose target lists are cross-matched: one per science
-        # sequence (all of them, if requested), plus the first exposure of
-        # every fiber table that will be written (`fiber_map_key`), so that
-        # the edited per-exposure tables are cross-matched too.
-        xmatch_indices = []
-        for si, ei in sequences["objects"]:
-            xmatch_indices.extend(
-                [si - 1] if only_assign_sdss_id_to_first_exposure_per_configuration else range(si - 1, ei)
-            )
-        if night_overrides:
-            first_of_key = {}
-            for i, e in enumerate(exposures):
-                if e.image_type == "object":
-                    first_of_key.setdefault(e.fiber_map_key, i)
-            xmatch_indices.extend(first_of_key.values())
-        xmatch_indices = list(dict.fromkeys(xmatch_indices))
-
-        identifiers = {}
-        for i in xmatch_indices:
-            for target in exposures[i].targets:
-                key, identifier = parse_target_identifier(target)
-                identifiers.setdefault(key, set()).add(identifier)
-
-        if meta:
-            # We will often run `get_almanac_data` in parallel (through multiple processes),
-            # so here we are avoiding opening a database connection until the child process starts.
-            from almanac.database import is_database_available, catalogdb
-
-            lookup = {}
-            if "catalogid" in identifiers and is_database_available:
-                lookup["catalogid"] = catalogid_sdss_id_lookup(identifiers["catalogid"])
-
-            if "gaia_dr2" in identifiers and is_database_available:
-                lookup["gaia_dr2"] = gaia_dr2_sdss_id_lookup(identifiers["gaia_dr2"])
-
-            if "coordinate" in identifiers and is_database_available:
-                # Query only the APOGEE IDs this night needs (memoised per
-                # process), unless a full lookup was installed.
-                lookup["apogee_id"] = get_apogee_id_lookup(identifiers["coordinate"])
-                remaining = set(identifiers["coordinate"]).difference(lookup["apogee_id"].keys())
-
-                if remaining:
-                    # For remaining things, check 2MASS.
-                    lookup["twomass_psc"] = twomass_sdss_id_lookup(remaining)
-
-            # Add sdss_id to targets
-            from almanac.overrides import skip_cross_match
-            for i in xmatch_indices:
-                exposure = exposures[i]
-                for target in exposure.targets:
-                    if skip_cross_match(target):
-                        # A solar-system body placed on the fiber by an
-                        # override: its sdss_id was set there.
-                        continue
-                    if not assigns_sdss_id(target.category):
-                        # Don't assign sdss_id to unplugged targets, or to
-                        # off-target fibers: the positioner never reached
-                        # the assigned target, so whatever light the fiber
-                        # collected did not come from that source.
-                        continue
-
-                    key, identifier = parse_target_identifier(target)
-                    if key == "coordinate":
-                        for lookup_key in ("apogee_id", "twomass_psc"):
-                            target.sdss_id = lookup[lookup_key].get(identifier, -1)
-                            if target.sdss_id != -1:
-                                break
-                    else:
-                        target.sdss_id = lookup[key].get(identifier, -1)
+        cross_match_targets(
+            exposures,
+            sequences["objects"],
+            xmatch=meta,
+            only_assign_sdss_id_to_first_exposure_per_configuration=(
+                only_assign_sdss_id_to_first_exposure_per_configuration
+            ),
+            include_first_exposure_per_fiber_map_key=bool(night_overrides),
+        )
 
     return (observatory, mjd, exposures, sequences, missing)

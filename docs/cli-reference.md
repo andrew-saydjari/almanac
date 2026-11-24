@@ -146,7 +146,7 @@ Long queries are fault-isolated per observatory/MJD pair:
 ## Metadata Commands
 
 ### `almanac add metadata <file>`
-Build a `meta/` group (one row per unique `sdss_id`: catalog cross-match ids, Gaia DR3 astrometry and photometry, 2MASS photometry, SDSS-V targeting flags) from the `sdss_id` in an almanac HDF5 file created with `--fibers`.
+Build a `meta/` group (one row per unique `sdss_id`: catalog cross-match ids, Gaia DR3 astrometry and photometry, 2MASS photometry, SDSS-V targeting flags) from the `sdss_id` in an almanac HDF5 file created with `--fibers`. If none of the selected nights has fiber mappings, it exits with status 1 and writes nothing (no `/meta`, no output file, no checkpoint); nights without fiber mappings are counted in a warning and skipped.
 
 **Recommended workflow: never write the almanac file the pipeline reads.** Either decorate a copy, or write a targets-only file:
 

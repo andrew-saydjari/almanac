@@ -28,6 +28,11 @@ cartons the installed ``sdss_semaphore`` knows, listed in the
 With ``since``, rows already present in a previously decorated file (or a
 targets file) are copied rather than queried.
 
+The input must contain fiber mappings (an almanac file built with
+``--fibers``): if none of the selected nights has a ``fibers`` group the build
+stops before writing anything (adapted from upstream sdss/almanac #66), and
+nights without one are counted in a warning.
+
 With ``extended`` (``almanac add metadata --extended``), the value-added
 columns of ``ExtendedSource`` are queried too and written after the default
 columns (adapted from upstream sdss/almanac a922dee). Without it the output
@@ -47,7 +52,7 @@ import signal
 import subprocess
 import time
 from collections import Counter
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import h5py as h5
 import numpy as np
@@ -150,6 +155,27 @@ def collect_sdss_ids(input_path: str, observatories: Sequence[str], mjds=None) -
     if not parts:
         return np.zeros(0, dtype=np.int64)
     return np.unique(np.concatenate(parts))
+
+
+def count_nights_with_fibers(input_path: str, observatories: Sequence[str], mjds=None) -> Tuple[int, int]:
+    """
+    ``(n_nights, n_with_fibers)`` for the selected nights in ``input_path``
+    (read-only): how many ``raw/<obs>/<mjd>`` groups match the selection, and
+    how many of them have a ``fibers`` group.
+    """
+    wanted = None if mjds is None else {int(m) for m in mjds}
+    n_nights = n_with = 0
+    with h5.File(input_path, "r") as fp:
+        for obs in observatories:
+            if f"raw/{obs}" not in fp:
+                continue
+            for mjd in fp[f"raw/{obs}"]:
+                if wanted is not None and int(mjd) not in wanted:
+                    continue
+                n_nights += 1
+                if f"raw/{obs}/{mjd}/fibers" in fp:
+                    n_with += 1
+    return n_nights, n_with
 
 
 def solar_system_ids(ids) -> np.ndarray:
@@ -670,6 +696,20 @@ def build_metadata(
 
     # 1. The sdss_id set (input opened read-only).
     if ids is None:
+        # A file built without --fibers has no targets: say so and write
+        # nothing, instead of writing an empty /meta.
+        n_nights, n_with = count_nights_with_fibers(input_path, observatories, mjds)
+        if n_with == 0:
+            raise MetadataBuildError(
+                f"no fiber mappings in {input_path} for the {n_nights} selected night(s), "
+                "so there are no targets to add metadata for. Build the almanac file "
+                "with --fibers first. Nothing was written."
+            )
+        if n_with < n_nights:
+            _log(
+                f"WARNING: {n_nights - n_with} of {n_nights} selected nights in "
+                f"{input_path} have no fiber mappings and are skipped"
+            )
         all_ids = collect_sdss_ids(input_path, observatories, mjds)
     else:
         all_ids = np.unique(np.asarray(list(ids), dtype=np.int64))
