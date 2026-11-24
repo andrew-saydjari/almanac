@@ -535,6 +535,11 @@ successfully is removed), with the counts of the last run as attributes.
 | `last_run_n_failed` | Failed (not written) |
 | `last_run_n_db_unavailable` | Written without the operations database |
 | `last_run_n_not_processed` | Not reached because the run was stopped by a signal |
+| `last_run_n_exception` | Failed, category `exception` |
+| `last_run_n_database_error` | Failed, category `database_error` |
+| `last_run_n_write_failed` | Failed, category `write_failed` |
+| `last_run_n_pool_broken` | Failed, category `pool_broken` |
+| `last_run_exit_status_name` | Name of the exit status (`almanac.exit_codes.ExitStatus`, or `SIGTERM` etc. for 128 + signal) |
 | `last_run_exit_status` | Exit status of the run (see [exit status](cli-reference.md#fault-tolerance-and-exit-status)) |
 | `last_run_finished_utc` | When the run finished (UTC, ISO 8601) |
 | `last_run_almanac_version` | almanac version |

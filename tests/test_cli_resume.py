@@ -102,7 +102,7 @@ class TestFaultIsolation:
 
         result = run_cli(["--mjd", str(MJD), "--apo", "--output", output])
         # The run completes, records the failure, still writes the
-        # missing-exposures table, and exits with status 3 (failed nights).
-        assert result.exit_code == 3
+        # missing-exposures table, and exits with ExitStatus.NIGHT_EXCEPTION.
+        assert result.exit_code == 6  # ExitStatus.NIGHT_EXCEPTION
         with h5.File(output, "r") as fp:
             assert "missing_exposures" in fp

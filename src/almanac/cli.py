@@ -52,13 +52,8 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
         apogee.set_apogee_id_source(apogee_id_source)
 
 
-# Exit statuses of the main command (see docs/cli-reference.md, "Fault
-# tolerance and exit status"). 0 also covers nights with no data and nights
-# skipped by --skip-existing; 1 and 2 are click's (error, bad usage).
-EXIT_NIGHTS_FAILED = 3
-EXIT_DB_UNAVAILABLE = 4
-
-# Night categories that count as failed (the night is not in the file).
+# Night categories that count as failed (the night is not in the file). The
+# exit status of each category is defined in `almanac.exit_codes`.
 FAILED_CATEGORIES = ("exception", "database_error", "write_failed", "pool_broken")
 
 
@@ -78,28 +73,39 @@ def _failure_category(exception) -> str:
     return "exception"
 
 
+def _run_categories(failed, db_unavailable_keys, cross_match_requested):
+    """The problem categories of a run (keys of `exit_codes.CATEGORY_EXIT_STATUS`)."""
+    categories = {category for _, _, category, _ in failed}
+    if db_unavailable_keys:
+        categories.add("db_unavailable_cross_match" if cross_match_requested else "db_unavailable")
+    return categories
+
+
 def _run_exit_status(failed, db_unavailable_keys, cross_match_requested) -> int:
     """
-    Exit status of the main command (conservative: only unambiguous problems
-    are non-zero):
-
-    * `EXIT_NIGHTS_FAILED` (3) if any night failed (`failed`: [(observatory,
-      mjd, category, message), ...]; an exception while processing or writing
-      it, a database error that persisted after the retries, a broken
-      process pool): the night is not in the output.
-    * else `EXIT_DB_UNAVAILABLE` (4) if cross-matching was requested
-      (``--fibers`` without ``--no-x-match``) and the operations database
-      could not be queried for at least one night (`db_unavailable_keys`; its
-      missing-exposures check is incomplete, reason ``db_unavailable``).
-    * else 0, also when nights had no data or were skipped by
-      ``--skip-existing``, and for ``db_unavailable`` nights of a build that
-      did not request the cross-match.
+    Exit status of the main command: the highest `almanac.exit_codes.ExitStatus`
+    of the problems of the run (`failed`: [(observatory, mjd, category,
+    message), ...]; `db_unavailable_keys`: nights written without the
+    operations database), 0 if none. Nights without data and nights skipped by
+    ``--skip-existing`` are not problems.
     """
-    if any(category in FAILED_CATEGORIES for _, _, category, _ in failed):
-        return EXIT_NIGHTS_FAILED
-    if cross_match_requested and db_unavailable_keys:
-        return EXIT_DB_UNAVAILABLE
-    return 0
+    from almanac.exit_codes import exit_status_for
+
+    return int(exit_status_for(_run_categories(failed, db_unavailable_keys, cross_match_requested)))
+
+
+def _exit_status_name(status: int) -> str:
+    """`ExitStatus` name of an exit status, or SIG<NAME> for 128 + signal."""
+    import signal
+    from almanac.exit_codes import ExitStatus
+
+    try:
+        return ExitStatus(status).name
+    except ValueError:
+        try:
+            return signal.Signals(status - 128).name
+        except ValueError:
+            return str(status)
 
 
 def _run_summary(counts, failed, db_unavailable_keys, exit_status):
@@ -111,7 +117,7 @@ def _run_summary(counts, failed, db_unavailable_keys, exit_status):
     log(
         "Run summary: "
         + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in counts.items())
-        + f"; exit status {exit_status}"
+        + f"; exit status {exit_status} ({_exit_status_name(exit_status)})"
     )
     if failed:
         logger.warning(f"{len(failed)} observatory/MJD pairs failed and were skipped:")
@@ -625,6 +631,10 @@ def main(
                 with_data=len(done_keys - no_data_keys - failed_keys),
                 no_data=len(no_data_keys),
                 failed=len(failed_keys),
+                **{
+                    category: len({(o, m) for o, m, c, _ in failed if c == category})
+                    for category in FAILED_CATEGORIES
+                },
                 db_unavailable=len(db_unavailable_keys),
                 not_processed=max(
                     0, n_requested - n_skipped - len(done_keys | failed_keys)
@@ -659,6 +669,7 @@ def main(
                         attrs={
                             **{f"last_run_n_{k}": v for k, v in counts.items()},
                             "last_run_exit_status": exit_status,
+                            "last_run_exit_status_name": _exit_status_name(exit_status),
                             "last_run_finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                             "last_run_almanac_version": __version__,
                             "last_run_cross_match": cross_match_requested,
@@ -707,12 +718,24 @@ def _lookup_night_writer(output):
     _source, lookup_attrs, _full = apogee.prepare_cross_match(True)
 
     def write_night(observatory, mjd):
-        observatory, mjd, exposures, sequences, _missing = apogee.get_almanac_data(
-            observatory, mjd, fibers=True, meta=True
-        )
-        with io.open_for_writing(output) as fp:
-            io.update(fp, observatory, mjd, exposures, sequences, fibers=True, compression=False)
-            io.write_night_attrs(fp, observatory, mjd, override_attrs, lookup_attrs)
+        """None if written, else the failure category (see almanac.exit_codes)."""
+        from almanac import logger
+
+        try:
+            observatory, mjd, exposures, sequences, _missing = apogee.get_almanac_data(
+                observatory, mjd, fibers=True, meta=True
+            )
+        except Exception as e:
+            logger.exception(f"Failed to process {observatory}/{mjd}: {e}")
+            return _failure_category(e)
+        try:
+            with io.open_for_writing(output) as fp:
+                io.update(fp, observatory, mjd, exposures, sequences, fibers=True, compression=False)
+                io.write_night_attrs(fp, observatory, mjd, override_attrs, lookup_attrs)
+        except Exception as e:
+            logger.exception(f"Failed to write {observatory}/{mjd}: {e}")
+            return "write_failed"
+        return None
 
     return write_night
 
@@ -840,6 +863,7 @@ def lookup(identifiers, output, **kwargs):
         rich_table.add_column(field_name, justify="center")
 
     done = set()
+    failed_categories = {}  # (observatory, mjd) -> category
     if output:
         # Nights written with -O are built exactly as `almanac --fibers` builds
         # them, night attributes included.
@@ -853,7 +877,9 @@ def lookup(identifiers, output, **kwargs):
 
             if output and key not in done:
                 done.add(key)
-                write_night(*key)
+                category = write_night(*key)
+                if category:
+                    failed_categories[key] = category
 
             if exposure.field_id in field_ids:
                 for target in exposure.targets:
@@ -880,7 +906,15 @@ def lookup(identifiers, output, **kwargs):
     if output:
         console.print(f"Updated {output} with:")
         for obs, mjd in done:
-            console.print(f"  - {obs}/{mjd}")
+            if (obs, mjd) not in failed_categories:
+                console.print(f"  - {obs}/{mjd}")
+        for (obs, mjd), category in sorted(failed_categories.items()):
+            console.print(f"  failed {obs}/{mjd} [{category}]")
+        from almanac.exit_codes import exit_status_for
+
+        status = exit_status_for(set(failed_categories.values()))
+        if status:
+            raise SystemExit(int(status))
 
 
 @main.group()
@@ -1075,6 +1109,28 @@ def fibers(
             for observatory, mjd in nights
         ]
 
+    def _process_and_write(observatory, mjd, get_result):
+        """Run (or collect) one night and write it, classifying a failure."""
+        from concurrent.futures.process import BrokenProcessPool
+
+        try:
+            result = get_result()
+        except KeyboardInterrupt:
+            raise
+        except BrokenProcessPool as e:
+            logger.error(f"Failed to add fibers for {observatory}/{mjd}: {e}")
+            failed.append((observatory, mjd, "pool_broken", str(e)))
+            return
+        except Exception as e:
+            logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
+            failed.append((observatory, mjd, _failure_category(e), str(e)))
+            return
+        try:
+            _write(*result)
+        except Exception as e:
+            logger.exception(f"Failed to write the fibers of {observatory}/{mjd}: {e}")
+            failed.append((observatory, mjd, "write_failed", str(e)))
+
     from almanac.signals import GracefulStop
 
     # SIGINT/SIGTERM/SIGHUP: kill the workers, keep the nights already
@@ -1107,13 +1163,7 @@ def fibers(
                         }
                         for future in concurrent.futures.as_completed(futures):
                             observatory, mjd = futures[future]
-                            try:
-                                _write(*future.result())
-                            except KeyboardInterrupt:
-                                raise
-                            except Exception as e:
-                                logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
-                                failed.append((observatory, mjd, str(e)))
+                            _process_and_write(observatory, mjd, future.result)
                     except KeyboardInterrupt:
                         import signal as _signal
                         with stop.deferred():
@@ -1126,14 +1176,7 @@ def fibers(
                         raise
             else:
                 for args in task_args:
-                    observatory, mjd = args[:2]
-                    try:
-                        _write(*_add_fibers_task(*args))
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception as e:
-                        logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
-                        failed.append((observatory, mjd, str(e)))
+                    _process_and_write(*args[:2], functools.partial(_add_fibers_task, *args))
         except KeyboardInterrupt as e:
             import signal as _signal
             interrupted = getattr(e, "signum", _signal.SIGINT)
@@ -1142,12 +1185,19 @@ def fibers(
     logger.info(f"Added fiber mappings for {len(done)} of {len(nights)} nights in {target}")
     for observatory, mjd, differences in refused:
         logger.warning(f"  refused {observatory}/{mjd}: {'; '.join(differences)}")
-    for observatory, mjd, message in failed:
-        logger.warning(f"  failed {observatory}/{mjd}: {message}")
+    for observatory, mjd, category, message in failed:
+        logger.warning(f"  failed {observatory}/{mjd} [{category}]: {message}")
     if interrupted is not None:
         sys.exit(128 + int(interrupted))
-    if refused or failed:
-        sys.exit(1)
+    # The highest exit status of the problems (almanac.exit_codes).
+    from almanac.exit_codes import exit_status_for
+
+    status = exit_status_for(
+        {c for _, _, c, _ in failed} | ({"refused"} if refused else set())
+    )
+    if status:
+        logger.warning(f"Exit status {int(status)} ({status.name})")
+        sys.exit(int(status))
 
 
 @add.command()
@@ -1266,6 +1316,7 @@ def metadata(
     INPUT must contain fiber mappings (built with --fibers). If none of the
     selected nights has them, nothing is written and the exit code is 1.
     """
+    import sys
     from almanac import utils, config
     from almanac.metadata import build_metadata, MetadataBuildError
 
@@ -1303,7 +1354,11 @@ def metadata(
             extended=extended,
         )
     except MetadataBuildError as e:
-        raise click.ClickException(str(e))
+        if e.exit_status is None:
+            raise click.ClickException(str(e))
+        # A batch failed after its retries (almanac.exit_codes).
+        click.echo(f"Error: {e} (exit status {int(e.exit_status)}, {e.exit_status.name})", err=True)
+        sys.exit(int(e.exit_status))
 
 
 def _postprocess_chunk_worker(args):

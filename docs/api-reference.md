@@ -20,6 +20,7 @@ almanac/
 ├── io.py                # HDF5 writers and readers
 ├── writer.py            # background HDF5 writer thread
 ├── signals.py           # clean stops on SIGINT/SIGTERM/SIGHUP
+├── exit_codes.py        # ExitStatus: the exit status of each kind of problem
 ├── metadata.py          # `almanac add metadata`
 ├── catalog.py           # catalog queries behind /meta
 ├── qa.py                # known-bad exposure list

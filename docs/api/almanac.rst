@@ -60,6 +60,14 @@ almanac.display module
    :undoc-members:
    :show-inheritance:
 
+almanac.exit_codes module
+-------------------------
+
+.. automodule:: almanac.exit_codes
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 almanac.io module
 -----------------
 

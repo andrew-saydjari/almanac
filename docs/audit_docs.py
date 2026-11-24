@@ -498,6 +498,27 @@ def marked_tables(text):
     return out
 
 
+def check_exit_status_table(repo):
+    """The exit-status table of cli-reference.md lists exactly `ExitStatus`, with its codes."""
+    from almanac.exit_codes import ExitStatus
+
+    path = Path(repo) / "docs/cli-reference.md"
+    text = path.read_text()
+    tables = marked_tables(text)
+    if "exit_status" not in tables:
+        problem("ERROR", "docs/cli-reference.md", "no `<!-- audit:table exit_status -->` table")
+        return
+    documented = set(tables["exit_status"])
+    expected = {s.name for s in ExitStatus}
+    for n in sorted(expected - documented):
+        problem("ERROR", "docs/cli-reference.md (exit_status)", f"`{n}` is defined but not documented")
+    for n in sorted(documented - expected):
+        problem("ERROR", "docs/cli-reference.md (exit_status)", f"`{n}` is documented but not defined")
+    for status in ExitStatus:
+        if f"| `{status.name}` | {int(status)} |" not in text:
+            problem("ERROR", "docs/cli-reference.md (exit_status)", f"`{status.name}` should have code {int(status)}")
+
+
 def check_hdf5_tables(repo, synth):
     path = Path(repo) / "docs/data-formats.md"
     tables = marked_tables(path.read_text())
@@ -600,6 +621,7 @@ def main():
     check_config(repo, keys)
     check_model_tables(repo, mdl)
     check_hdf5_tables(repo, synth)
+    check_exit_status_table(repo)
     lint(repo, version)
 
     errors = [p for p in problems if p[0] == "ERROR"]

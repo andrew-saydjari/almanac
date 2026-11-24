@@ -35,6 +35,14 @@ Unreleased (fork)
   written, ``/missing_exposures`` and ``/run_summary`` written, exit status 128 + signal.
   Nights written by a killed run are listed in ``/missing_exposures_pending`` and processed
   again by the next ``--skip-existing`` run, so their missing-exposure rows are not lost.
+* Exit statuses: one per kind of problem, increasing with severity, defined once in
+  ``almanac.exit_codes.ExitStatus`` and used by ``almanac``, ``add fibers``, ``add metadata``
+  and ``lookup -O``; a run exits with the highest that occurred: 3 ``DB_UNAVAILABLE``
+  (nights written, no cross-match; was 0), 4 ``DB_UNAVAILABLE_CROSS_MATCH``, 5
+  ``NIGHT_REFUSED`` (``add fibers``; was 1), 6 ``NIGHT_EXCEPTION``, 7 ``DATABASE_ERROR``
+  (also ``add metadata`` batches; was 1), 8 ``WRITE_FAILED``, 9 ``POOL_BROKEN``. The code and
+  its name are stored in ``/run_summary`` (``last_run_exit_status[_name]``), with a count
+  per category. This supersedes the 3/4 statuses of the entry below.
 * Main command: end-of-run summary and exit status. Every run logs the number of nights
   requested, skipped by ``--skip-existing``, with data, without data, failed and built
   without the operations database, and lists the failed nights with a category

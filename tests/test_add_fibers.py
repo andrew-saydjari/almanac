@@ -104,7 +104,7 @@ class TestEndToEnd:
         path = str(tmp_path / "night.h5")
         write_night(path)
         result = run_cli(["add", "fibers", path, "--in-place", "--no-x-match", "-p", "1"])
-        assert result.exit_code == 1
+        assert result.exit_code == 5  # ExitStatus.NIGHT_REFUSED
         with h5.File(path, "r") as fp:
             assert f"raw/apo/{MJD}/fibers" not in fp
 
@@ -189,3 +189,15 @@ class TestReadBackAndRewind:
             assert "apogee_id_lookup_mode" in fp[f"raw/apo/{MJD}"].attrs
             io.write_night_attrs(fp, "apo", MJD, {}, {}, clear_stale_lookup_attrs=True)
             assert "apogee_id_lookup_mode" not in fp[f"raw/apo/{MJD}"].attrs
+
+
+def test_failed_night_exit_status(tmp_path, monkeypatch):
+    """A night whose processing raises: ExitStatus.NIGHT_EXCEPTION (6)."""
+    def boom(*args, **kwargs):
+        raise ValueError("No table named PLUGMAPOBJ")
+
+    monkeypatch.setattr(apogee, "process_night", boom)
+    path = str(tmp_path / "night.h5")
+    write_night(path)
+    result = run_cli(["add", "fibers", path, "--in-place", "--no-x-match", "-p", "1"])
+    assert result.exit_code == 6

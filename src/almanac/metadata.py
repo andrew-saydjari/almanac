@@ -65,7 +65,20 @@ CHECKPOINT_FORMAT = 1
 
 
 class MetadataBuildError(RuntimeError):
-    """Raised when the build cannot continue (the checkpoint is kept)."""
+    """
+    Raised when the build cannot continue (the checkpoint is kept).
+    ``exit_status``: the `almanac.exit_codes.ExitStatus` of the command, or
+    None for 1 (a usage or input problem).
+    """
+
+    def __init__(self, message, exit_status=None):
+        super().__init__(message)
+        self.exit_status = exit_status
+
+
+def _database_error_status():
+    from almanac.exit_codes import ExitStatus
+    return ExitStatus.DATABASE_ERROR
 
 
 class _Terminated(BaseException):
@@ -454,7 +467,8 @@ def _run_batches(
                     _log(f"batch {index} failed (attempt {attempts[index]}/{max_batch_attempts}): {e!r}")
                     if attempts[index] >= max_batch_attempts:
                         raise MetadataBuildError(
-                            f"batch {index} failed {attempts[index]} times; checkpoint kept, re-run to resume"
+                            f"batch {index} failed {attempts[index]} times; checkpoint kept, re-run to resume",
+                            exit_status=_database_error_status(),
                         ) from e
                     retry.append((index, ids))
                     continue
@@ -488,7 +502,8 @@ def _run_batches(
                         _log(f"batch {index} failed (attempt {attempts[index]}/{max_batch_attempts}): {e!r}")
                         if attempts[index] >= max_batch_attempts:
                             raise MetadataBuildError(
-                                f"batch {index} failed {attempts[index]} times; checkpoint kept, re-run to resume"
+                                f"batch {index} failed {attempts[index]} times; checkpoint kept, re-run to resume",
+                            exit_status=_database_error_status(),
                             ) from e
                         retry.append((index, ids))
                         continue

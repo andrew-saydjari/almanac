@@ -37,3 +37,12 @@ def test_lookup_output_writes_night_attrs(tmp_path, monkeypatch):
         attrs = dict(fp[f"raw/apo/{MJD}"].attrs)
         assert f"raw/apo/{MJD}/fibers/123" in fp
     assert attrs == {**overrides_attrs(True), **lookup_attrs}
+
+
+def test_lookup_output_classifies_failures(tmp_path, monkeypatch):
+    def boom(*args, **kwargs):
+        raise ValueError("No table named PLUGMAPOBJ")
+
+    monkeypatch.setattr(apogee, "get_almanac_data", boom)
+    monkeypatch.setattr(apogee, "prepare_cross_match", lambda *a, **k: (None, {}, None))
+    assert _lookup_night_writer(str(tmp_path / "x.h5"))("apo", MJD) == "exception"

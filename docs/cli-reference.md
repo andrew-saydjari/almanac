@@ -175,23 +175,39 @@ workers keep reading files meanwhile.
 - An invalid night selection (for example two selection options) raises an error (exit
   status 1 or 2); a malformed override file fails before any night is processed.
 
-What can happen to a requested night, and the exit status:
+Exit statuses (`almanac.exit_codes.ExitStatus`): one per kind of problem, increasing with
+severity. A run in which several kinds occur exits with the **highest**; the summary and
+`/run_summary` count every kind. 1 and 2 are click's (an error message, bad usage), and a
+run stopped by a signal exits with 128 + the signal number.
+
+<!-- audit:table exit_status -->
+| Name | Code | Meaning | Commands |
+|------|------|---------|----------|
+| `OK` | 0 | Nothing went wrong (nights without data and `--skip-existing` skips are not problems) | all |
+| `DB_UNAVAILABLE` | 3 | The operations database could not be queried for a night's expected exposures, cross-match not requested; the night is written, only its missing-exposure check is incomplete (`db_unavailable`) | `almanac` |
+| `DB_UNAVAILABLE_CROSS_MATCH` | 4 | The same, with the cross-match requested (`--fibers` without `--no-x-match`); the night is written | `almanac` |
+| `NIGHT_REFUSED` | 5 | A night was refused (stored exposures or sequences differ from the re-processed ones) and left untouched | `add fibers` |
+| `NIGHT_EXCEPTION` | 6 | An exception while processing a night (a plugmap without a `PLUGMAPOBJ` table, a missing confSummary, an unreadable raw file, or a bug); the night is not written | `almanac`, `add fibers`, `lookup -O` |
+| `DATABASE_ERROR` | 7 | A database error that persisted after the retries (cross-match lookups; `add metadata` batches), or a cross-match without a database connection; the night (batch) is not written | `almanac`, `add fibers`, `lookup -O`, `add metadata` |
+| `WRITE_FAILED` | 8 | Writing a night to the output file failed | `almanac`, `add fibers`, `lookup -O` |
+| `POOL_BROKEN` | 9 | The worker process pool broke (e.g. a worker was killed); its outstanding nights are not written | `almanac`, `add fibers` |
+
+What can happen to a requested night of `almanac`:
 
 | Night | In the file | Logged | Category in `/run_summary` | Exit status |
 |-------|-------------|--------|----------------------------|-------------|
 | Built normally (holes and missing raw files are recorded in `/missing_exposures`) | yes | summary count | (none) | 0 |
 | No exposure files on disk | no (only `/missing_exposures` rows, e.g. `db_no_file`) | summary count | (none) | 0 |
 | Skipped by `--skip-existing` (already in the file) | unchanged | summary count | earlier rows kept | 0 |
-| Exception while processing (e.g. a plugmap without a `PLUGMAPOBJ` table, a missing confSummary, an unreadable raw file) | no | error + traceback, listed at the end | `exception` | **3** |
-| Database error that persisted after the retries, or cross-match without a database connection | no | as above | `database_error` | **3** |
-| Writing the night failed | no | as above | `write_failed` | **3** |
-| Worker process pool broke (e.g. a worker was killed) | no | as above | `pool_broken` | **3** |
-| Operations database not reachable for the expected exposures, cross-match requested (`--fibers` without `--no-x-match`) | yes (missing-exposures check incomplete) | warning, listed at the end | `db_unavailable` | **4** (if no night failed) |
-| Same, without the cross-match | yes | as above | `db_unavailable` | 0 |
-
+| Operations database not reachable for the expected exposures | yes (missing-exposures check incomplete) | warning, listed at the end | `db_unavailable` | 3, or 4 with the cross-match |
+| Exception while processing | no | error + traceback, listed at the end | `exception` | 6 |
+| Database error after the retries, or cross-match without a connection | no | as above | `database_error` | 7 |
+| Writing the night failed | no | as above | `write_failed` | 8 |
+| Worker process pool broke | no | as above | `pool_broken` | 9 |
 | Not reached because the run was stopped by a signal | no | summary count (`not processed`) | (none) | 128 + signal |
 
-Exit status 3 takes precedence over 4. Without `--output` the same statuses apply.
+Without `--output` the same statuses apply. The two categories that cannot be told apart
+reliably are kept together: `NIGHT_EXCEPTION` covers bad input and bugs alike.
 
 ### Stopping a run
 
@@ -230,7 +246,7 @@ and sequences are compared with the stored ones, column by column in the stored
 representation. A night that would differ (the override list changed since the night was
 built, the night was built with the other `--no-overrides` setting, a file from before the
 overrides on a night that now has one, or raw files appeared or disappeared so that
-`chip_flags` changes) is refused, left untouched, and listed at the end (exit status 1):
+`chip_flags` changes) is refused, left untouched, and listed at the end (exit status 5):
 rebuild it with `almanac`. Every fiber table of an accepted night is replaced, and the
 night attributes are rewritten (stale `apogee_id_lookup_*` attributes are removed with
 `--no-x-match`).
@@ -245,7 +261,9 @@ every night in INPUT with an exposures table); `--output`/`-O`, `--in-place`;
 `--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes`/`-p` and
 `--query-workers` (as for `almanac`). There is no British-spelling alias for `add fibers`.
 
-**Exit status**: 1 if no night is selected, or if any night was refused or failed; 128 +
+**Exit status**: 1 if no night is selected; otherwise the highest of the
+[exit statuses](#fault-tolerance-and-exit-status) of its problems (5 refused, 6 exception,
+7 database error, 8 write failed, 9 pool broken); 128 +
 the signal number when stopped by SIGINT, SIGTERM or SIGHUP (the nights already written are
 kept; each night is written, flushed and closed on its own, so a killed run leaves a
 readable file).
@@ -265,7 +283,8 @@ fixed row without a query: `lead = "solar_system"`, every catalog column at its 
 
 If none of the selected nights has fiber mappings, it exits with status 1 and writes
 nothing (no `/meta`, no output file, no checkpoint); nights without fiber mappings are
-counted in a warning and skipped.
+counted in a warning and skipped. A batch that still fails after `--max-batch-attempts` stops the build with exit status 7
+(`DATABASE_ERROR`; the checkpoint is kept, re-run to resume); other errors exit with 1.
 
 **Never write the almanac file a pipeline reads.** Either decorate a copy, or write a
 targets-only file:
