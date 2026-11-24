@@ -60,11 +60,16 @@ The fiber edits are applied **before** the cross-match. In each edited table:
   information. A star becomes category `science` with the star's
   designation, ra and dec, and is then cross-matched to an `sdss_id` by the
   ordinary path, exactly like a plugged fiber; `almanac add metadata`
-  decorates it in the same way. A solar-system body keeps category
-  `retargeted`, has ra/dec NaN and gets `sdss_id = solar_system_sdss_id`
-  (a setting in the targets file);
-- `original_category`, `override_id` and `override_target` record the
-  change;
+  decorates it in the same way. A solar-system body (Vesta) also becomes
+  `science`, so it is reduced, but is not cross-matched: it gets
+  `sdss_id = solar_system_sdss_id` (0, a setting in the targets file), no
+  designation, and ra/dec = the raw-header RA/DEC of that exposure (each
+  such exposure gets its own table). `almanac add metadata` writes a fixed
+  `/meta` row for that `sdss_id` (lead `solar_system`, all catalogue columns
+  at their defaults) without a database query, and `almanac dump stars`
+  counts it;
+- `original_category`, `override_id`, `override_target` and `override_kind`
+  (`star` or `solar_system`) record the change;
 - with `other_fibers: offtarget`, every other fiber that asserts a target
   becomes `offtarget` (no `sdss_id`).
 

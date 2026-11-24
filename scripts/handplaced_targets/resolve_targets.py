@@ -101,6 +101,7 @@ STARS = {
     "HD 177724": "HD 177724",
     "beta Peg": "bet Peg",
     "HD 196944": "HD 196944",
+    "HD 199799": "HD 199799",
     "HD 9138": "HD 9138",
     "HD 195647": "HD 195647",
     "HD 193342": "HD 193342",
@@ -122,6 +123,10 @@ NOTES = {
     "GJ 699": "Barnard's star: proper motion 10.4 arcsec/yr; the 2011 pointing is ~2 arcmin from the J2000 position.",
     "Arcturus": "Proper motion 2.3 arcsec/yr.",
     "2MASS J03322626+4603247": "SIMBAD: 36 Per.",
+    "HD 199799": ("APO 55759 exposures 59-68: the log names HD196944, but the raw-header pointing "
+                  "(314.47, +44.79) is 46 deg from HD 196944 and 13-15 arcsec from HD 199799 "
+                  "(V2141 Cyg), which is also ~5 mag brighter in H, as the logged counts suggest. "
+                  "Reassigned to HD 199799 (AKS 2026-11-24)."),
     "HIP 98456": "Same star as HD 227049.",
     "HIP 99987": "Same star as HD 193342.",
     "HIP 101226": "Same star as HD 195647.",
@@ -275,15 +280,19 @@ def render(targets):
         "# sdss_id is stored here. ra/dec are ICRS J2000 (SIMBAD, epoch J2000).",
         "#",
         "# A solar-system body has no fixed position and no catalogue entry: its",
-        "# fiber keeps category `retargeted`, has ra/dec NaN and no 2MASS",
-        "# designation, and gets sdss_id = solar_system_sdss_id (below).",
+        "# fiber is category `science` (so it is reduced) with no 2MASS designation,",
+        "# ra/dec = the raw-header RA/DEC of that exposure (each such exposure gets",
+        "# its own fiber table), and sdss_id = solar_system_sdss_id (below); it is",
+        "# not cross-matched, and `almanac add metadata` writes a fixed /meta row",
+        "# for it (lead 'solar_system', everything else NaN / -1) without a query.",
         "#",
-        "# solar_system_sdss_id: SETTING, NOT A VERIFIED CONVENTION. On",
+        "# solar_system_sdss_id: SETTING (accepted by AKS 2026-11-24 for now), NOT A",
+        "# VERIFIED SDSS CONVENTION. On",
         "# 2026-11-23 the SDSS database had no sdss_id 0 (the smallest is 1,",
         "# and sdss_id 1 is an ordinary star at RA 312.73, Dec -3.29), and no",
         "# reserved 'Sun' sdss_id was found in almanac, ApogeeReduction.jl or",
         "# arMADGICS.jl. 0 is used because it collides with no catalogue",
-        "# source and `almanac add metadata` skips sdss_id <= 0.",
+        "# source.",
     ]
     doc = {"version": 1, "solar_system_sdss_id": 0, "targets": targets}
     return "\n".join(head) + "\n" + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=100)

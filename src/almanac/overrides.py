@@ -25,8 +25,10 @@ names an observatory, an MJD, a set of exposures and one action:
     * a star: category ``science``, the star's 2MASS designation (or SDSS-V
       ``catalogid`` if it has none), ra and dec;
     * a solar-system body (no fixed position, no catalogue entry): category
-      ``retargeted``, ra/dec NaN, no designation, and ``sdss_id`` =
-      ``solar_system_sdss_id`` of the targets file.
+      ``science`` (so it is reduced), no designation, ra/dec = the raw-header
+      RA/DEC of that exposure (each such exposure gets its own table), and
+      ``sdss_id`` = ``solar_system_sdss_id`` of the targets file; the
+      cross-match skips it (``override_kind`` = ``solar_system``).
 
     Either way ``override_target`` = the name, ``override_id`` = the entry
     and ``original_category`` = the plugmap category. ``other_fibers`` must
@@ -74,15 +76,21 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml
 
-#: Category given to a fiber that an override says saw a named object with no
-#: catalogue entry (a solar-system body; see ``retarget_fibers``). Not
-#: cross-matched: its ``sdss_id`` is ``solar_system_sdss_id``.
-from almanac.data_models.types import RETARGETED_CATEGORY  # noqa: E402
-
-#: Category given to a fiber that an override says saw a named star: the row
-#: then carries the star's targeting information and is cross-matched like
-#: any plugged science fiber.
+#: Category given to a fiber that an override says saw a named object: a star
+#: (the row carries the star's targeting information and is cross-matched like
+#: any plugged science fiber) or a solar-system body (not cross-matched; its
+#: sdss_id is ``solar_system_sdss_id``). Both are reduced as science.
 HANDPLACED_STAR_CATEGORY = "science"
+HANDPLACED_CATEGORY = HANDPLACED_STAR_CATEGORY
+
+#: Values of the fiber column ``override_kind``.
+STAR_KIND = "star"
+SOLAR_SYSTEM_KIND = "solar_system"
+
+
+def skip_cross_match(target) -> bool:
+    """True for a fiber whose sdss_id an override set (a solar-system body)."""
+    return getattr(target, "override_kind", "") == SOLAR_SYSTEM_KIND
 
 ACTIONS = (
     "retarget_fibers",
@@ -467,21 +475,34 @@ def _header_key(exposure) -> str:
     return str(exposure.original_config_id if exposure.fps else exposure.original_plate_id)
 
 
-def assign_override_table_ids(exposures, entries: List[Override]) -> None:
+def assign_override_table_ids(exposures, entries: List[Override],
+                              targets: Optional["HandplacedTargets"] = None) -> None:
     """
     Give every exposure edited by ``retarget_fibers`` entries its own fiber
     table ID (:func:`override_table_id`) in ``plate_id`` (plates) or
     ``config_id`` (FPS), keeping the header value in ``original_plate_id``
     (``original_config_id``). Exposures with the same header plate /
-    configuration and the same entries share one ID. Their targets are
-    loaded first, under the header ID. Idempotent.
+    configuration and the same entries share one ID, except that an exposure
+    with a solar-system body gets its own (its row holds that exposure's
+    position). Their targets are loaded first, under the header ID.
+    Idempotent.
     """
+    if targets is None:
+        try:
+            targets = load_handplaced_targets()
+        except Exception:
+            targets = None
+    kinds = {} if targets is None else {n: t.kind for n, t in targets.targets.items()}
     retargets = {}
+    solar = set()
     for entry in entries:
         if entry.action != "retarget_fibers":
             continue
+        moving = any(kinds.get(name) == SOLAR_SYSTEM_KIND for name in entry.fibers.values())
         for e in _exposures_by_number(exposures, entry):
             retargets.setdefault(e.exposure, (e, []))[1].append(entry.id)
+            if moving:
+                solar.add(e.exposure)
     todo = [(n, e, ids) for n, (e, ids) in sorted(retargets.items()) if e._override_table_id is None]
     if not todo:
         return
@@ -491,7 +512,7 @@ def assign_override_table_ids(exposures, entries: List[Override]) -> None:
             table_ids[e._override_table_group] = e._override_table_id
     for number, e, ids in todo:
         e.targets  # load (and cache) the plate/configuration targets under the header ID
-        group = (_header_key(e), tuple(ids))
+        group = (_header_key(e), tuple(ids), number if number in solar else None)
         if group not in table_ids:
             table_ids[group] = override_table_id(e.mjd, len(set(table_ids.values())) + 1)
         e._override_table_id = table_ids[group]
@@ -622,23 +643,48 @@ def is_override_table_id(value: int) -> bool:
     return int(value) >= OVERRIDE_TABLE_ID_BASE
 
 
-def _retarget_row(t, entry: Override, target: HandplacedTarget, solar_system_sdss_id: int) -> None:
+def header_pointing(exposure):
+    """
+    (RA, DEC) [deg] from the raw header of an exposure (NaN if unavailable).
+    For a hand-placed object this is the object's position at that exposure.
+    """
+    cached = getattr(exposure, "_header_pointing", None)
+    if cached is not None:
+        return cached
+    radec = (float("nan"), float("nan"))
+    try:
+        import os
+        from astropy.io import fits
+        for path in exposure.paths:
+            if os.path.exists(path):
+                h = fits.getheader(path, 1)
+                radec = (float(h["RA"]), float(h["DEC"]))
+                break
+    except Exception:
+        pass
+    exposure._header_pointing = radec
+    return radec
+
+
+def _retarget_row(t, entry: Override, target: HandplacedTarget, solar_system_sdss_id: int,
+                  pointing=(float("nan"), float("nan"))) -> None:
     """Replace a fiber row's targeting information with a hand-placed target's."""
     t.original_category = t.category
+    t.category = HANDPLACED_CATEGORY
     t.override_id = entry.id
     t.override_target = target.name
     t.target_ids = ""
     if target.kind == "star":
-        t.category = HANDPLACED_STAR_CATEGORY
+        t.override_kind = STAR_KIND
         t.twomass_id = target.twomass_designation
         t.catalogid = target.catalogid
         t.ra, t.dec = target.ra, target.dec
         t.sdss_id = -1  # assigned by the ordinary cross-match
     else:
-        t.category = RETARGETED_CATEGORY
+        t.override_kind = SOLAR_SYSTEM_KIND
         t.twomass_id = ""
         t.catalogid = -1
-        t.ra = t.dec = float("nan")
+        t.ra, t.dec = pointing
         t.sdss_id = solar_system_sdss_id
 
 
@@ -662,7 +708,7 @@ def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[
         return
     targets = load_handplaced_targets() if targets is None else targets
     check_target_names(entries, targets)
-    assign_override_table_ids(exposures, entries)  # no-op if apply_exposure_overrides did it
+    assign_override_table_ids(exposures, entries, targets)  # no-op if apply_exposure_overrides did it
 
     # The table io would write for each header plate/configuration: that of
     # the first exposure with that key and any targets. The targets of the
@@ -697,7 +743,9 @@ def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[
         for t in new:
             if t.fiber_id in retarget:
                 entry, name = retarget[t.fiber_id]
-                _retarget_row(t, entry, targets.targets[name], targets.solar_system_sdss_id)
+                target = targets.targets[name]
+                pointing = header_pointing(e) if target.kind == SOLAR_SYSTEM_KIND else (float("nan"),) * 2
+                _retarget_row(t, entry, target, targets.solar_system_sdss_id, pointing)
             elif offtarget_entry is not None:
                 from almanac.data_models.types import asserts_target_identity, OFF_TARGET_CATEGORY
                 if asserts_target_identity(t.category):

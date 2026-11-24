@@ -12,7 +12,6 @@ import pytest
 
 from almanac.data_models.exposure import Exposure
 from almanac.data_models.plate import PlateTarget
-from almanac.data_models.types import RETARGETED_CATEGORY
 from almanac.io import write_models_to_hdf5_group
 from almanac.overrides import (
     OverrideError,
@@ -140,8 +139,9 @@ class TestRowRewrite:
         assert star.override_id == "arc" and star.override_target == "Arcturus"
 
         solar = {t.fiber_id: t for t in exposures[2].targets}[1]
-        assert solar.category == RETARGETED_CATEGORY and solar.sdss_id == 0
+        assert solar.category == "science" and solar.sdss_id == 0 and solar.override_kind == "solar_system"
         assert solar.twomass_designation == "" and math.isnan(solar.ra) and math.isnan(solar.dec)
+        assert star.override_kind == "star"
 
         cat = {t.fiber_id: t for t in exposures[3].targets}[3]
         assert cat.category == "science" and cat.catalogid == 63050400612470882 and cat.twomass_designation == ""
@@ -150,6 +150,23 @@ class TestRowRewrite:
         # The plain table (exposure 1) is untouched.
         assert [t.category for t in exposures[0].targets] == ["science"] * 3 + ["sky_apogee"]
         assert [t.twomass_designation for t in exposures[0].targets][1] == "2M00000002-0000000"
+
+
+def test_solar_system_rows_get_their_own_table_and_position(monkeypatch):
+    """Each exposure with a solar-system body gets its own table, holding that exposure's header RA/DEC."""
+    import almanac.overrides as ov
+
+    targets = parse_handplaced_targets(TARGETS_TEXT)
+    monkeypatch.setattr(ov, "header_pointing", lambda e: (300.0 + e.exposure, -20.0 - e.exposure))
+    entries = parse_overrides(_doc(_entry(id="ves", exposures="2-3", fibers={1: "VESTA"})))
+    exposures = _night()
+    apply_exposure_overrides(exposures, entries)
+    apply_fiber_overrides(exposures, entries, targets)
+    assert exposures[1].plate_id != exposures[2].plate_id
+    for x in exposures[1:3]:
+        row = {t.fiber_id: t for t in x.targets}[1]
+        assert (row.ra, row.dec) == (300.0 + x.exposure, -20.0 - x.exposure)
+        assert row.category == "science" and row.sdss_id == 0 and row.override_kind == "solar_system"
 
 
 class TestCrossMatchThroughNormalPath:
@@ -215,7 +232,8 @@ class TestCrossMatchThroughNormalPath:
         plain = [e for e in exposures if e.fiber_map_key == "4925"]
         assert not plain  # every exposure of this mock night is overridden
         ves = {t.fiber_id: t for t in by[3].targets}
-        assert ves[1].sdss_id == 0 and ves[1].category == RETARGETED_CATEGORY
+        # Vesta: science, but its sdss_id (0) is kept, not cross-matched to -1.
+        assert ves[1].sdss_id == 0 and ves[1].category == "science"
 
         cat = {t.fiber_id: t for t in by[4].targets}
         assert cat[3].sdss_id == 125919743 and 63050400612470882 in seen["catalogid"]
@@ -292,7 +310,8 @@ def _make_overrides():
 
 
 def _handplaced_entries():
-    return [e for e in load_overrides() if "-handplaced-" in e.id]
+    """The generated handplaced-2011 entries (not the hand-written no-plate ones)."""
+    return [e for e in load_overrides() if "-handplaced-" in e.id and "-no-plate-" not in e.id]
 
 
 class TestHandplaced2011:
@@ -306,7 +325,7 @@ class TestHandplaced2011:
         entries = _handplaced_entries()
         retarget = {(e.mjd, x) for e in entries if e.action == "retarget_fibers" for x in e.exposures}
         bad = {(e.mjd, x) for e in entries if e.action == "not_science" for x in e.exposures}
-        assert len(retarget) == 186 and len(bad) == 39 and not retarget & bad
+        assert len(retarget) == 194 and len(bad) == 31 and not retarget & bad
         assert {m for m, _ in retarget | bad} == {55699, 55700, 55701, 55702, 55725, 55726, 55727, 55729,
                                                    55730, 55731, 55754, 55757, 55759, 55810, 55811, 55815}
         targets = load_handplaced_targets()
@@ -322,9 +341,29 @@ class TestHandplaced2011:
         assert by[(55754, 28)].fibers == {240: "HD 208527"}
         assert by[(55810, 45)].fibers == {158: "HD 156681"}
         assert by[(55729, 58)].fibers == {52: "HD 175305"}
-        assert all(by[(55759, x)].action == "not_science" for x in range(59, 69))
+        # 55759/59-68: the log's "HD196944" is HD 199799 (pointing); 64, 66 have no light.
+        for x, fiber in ((59, 195), (60, 230), (63, 230), (65, 234), (67, 188), (68, 188)):
+            assert by[(55759, x)].fibers == {fiber: "HD 199799"}, x
+        assert by[(55759, 64)].action == by[(55759, 66)].action == "not_science"
+        assert "HD196944" in by[(55759, 60)].notes
         assert by[(55759, 69)].fibers == {230: "HD 9138"}
-        assert (55727, 28) not in by and (55729, 71) not in by
+        assert (55727, 28) not in by and (55729, 71) not in by  # hand-written entries, below
+
+    def test_no_plate_exposures_are_not_science(self):
+        """55727/28 and 55729/71 have no plate cards: hand-written not_science entries, flagged for a later rescue."""
+        entries = {e.id: e for e in load_overrides() if "-no-plate-" in e.id}
+        assert set(entries) == {"apo-55727-handplaced-no-plate-hd130322-f162", "apo-55729-handplaced-no-plate-hr7442-f222"}
+        for e, (mjd, x, plate) in zip(sorted(entries.values(), key=lambda e: e.mjd), ((55727, 28, "4823"), (55729, 71, "4819"))):
+            assert (e.mjd, e.exposures, e.action) == (mjd, (x,), "not_science")
+            assert plate in e.reason and "Candidate for a later rescue" in e.notes
+            # An exposure with no plate ID (plate_id -1) takes the entry: flagged, labelled.
+            exposures = [Exposure(observatory="apo", mjd=mjd, exposure=i, imagetyp="Object",
+                                  plateid=-1 if i == x else int(plate)) for i in range(1, x + 2)]
+            apply_exposure_overrides(exposures, [e])
+            bad = exposures[x - 1]
+            assert bad.plate_id == -1 and bad.flagged_bad
+            assert bad.override_ids == e.id and bad.override_actions == "not_science"
+            assert not exposures[x - 2].flagged_bad and exposures[x - 2].override_ids == ""
 
     def test_every_entry_applies_to_a_mock_night(self):
         """Apply each night's entries to mock plate exposures with 300-fiber tables: nothing may fail."""

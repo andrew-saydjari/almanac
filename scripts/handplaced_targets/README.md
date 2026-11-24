@@ -32,11 +32,14 @@ other. The edited table is stored under a synthetic ID that replaces the
 exposure's `plate_id` (header value kept in `original_plate_id`), so
 ApogeeReduction.jl, which opens `fibers/<plate_id>`, reads it with no change. No `sdss_id` is stored in either file.
 
-A solar-system body has no fixed position and no catalogue entry: its row
-keeps category `retargeted`, ra/dec NaN, no designation, and `sdss_id` =
-`solar_system_sdss_id` from the targets file (0; see the note there: this
-is a setting, not a verified SDSS convention). Its position at each exposure
-is the raw-header RA/DEC of that exposure (or JPL Horizons, designation 4).
+A solar-system body has no fixed position and no catalogue entry. Its row is
+category `science` (so it is reduced), `override_kind` `solar_system`, no
+designation, `sdss_id` = `solar_system_sdss_id` from the targets file (0; see
+the note there: a setting, not a verified SDSS convention), and is not
+cross-matched. Each such exposure gets its own fiber table, whose row holds
+that exposure's raw-header RA/DEC (the object's position then; JPL Horizons
+designation 4 for an independent ephemeris). `almanac add metadata` writes a
+fixed `/meta` row for it without a query (`almanac.metadata.SOLAR_SYSTEM_META`).
 
 ## The inventory: `handplaced_2011.csv`
 
@@ -56,11 +59,14 @@ The rule:
 * `not_science`: the telescope was pointed off the plate field (so no plugged
   fiber saw its target), but the fiber that saw the star is not established:
   no trace stands out, or a second fiber is comparably bright, or the
-  brightest trace is not the stated fiber, or the star's identity is in doubt
-  (APO 55759/59-68: the log says HD 196944 but the pointing is 46 deg away from
-  it, 15 arcsec from V2141 Cyg).
+  brightest trace is not the stated fiber.
+* A wrong name in the log is corrected where the pointing settles it (APO
+  55759/59-68: the log says HD 196944, the pointing is 46 deg from it and 13
+  arcsec from HD 199799, which is used; the row's note says so).
 * `skip`: the raw header has no PLATEID (APO 55727/28, 55729/71), so almanac
-  builds no fiber table for the exposure and there is nothing to override.
+  builds no fiber table for the exposure. They are listed by hand, above the
+  generated block, as `not_science` with a note that marks them as candidates
+  for a later rescue (plate from the neighbouring exposures + retarget).
 
 The CSV is rebuilt from scratch by the scripts in `datacheck/`, run from an
 empty working directory (they write `notes/` there):

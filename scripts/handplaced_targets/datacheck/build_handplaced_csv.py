@@ -17,6 +17,14 @@ def comment_lines(mjd):
             out[int(m.group(2))].append(" ".join(l.split()))
     return out
 
+#: Objects whose log name was wrong, by night: the note recorded with each row.
+REASSIGNED = {
+    55759: {"HD 199799": (
+        "the log names HD196944; the raw-header pointing is 46 deg from HD 196944 and 13 arcsec from "
+        "HD 199799 (V2141 Cyg, H = 1.7 against 6.6 for HD 196944, consistent with the logged counts), "
+        "so the star is HD 199799 (reassigned 2026-11-24)")},
+}
+
 cache = {}
 rows = []
 for r in inv:
@@ -30,10 +38,6 @@ for r in inv:
     if r["almanac_n_fibers"] in ("", "0"):
         action = "skip"
         note = "raw header has no PLATEID, so almanac builds no fiber table for this exposure"
-    elif target.endswith("?"):
-        action = "not_science"
-        note = ("log names HD196944, but the raw-header pointing (314.47, +44.79) is 46 deg from HD 196944 "
-                "and 15 arcsec from V2141 Cyg: the star in the fiber is not established")
     elif verdict == "MATCH":
         action = "retarget_fibers"
     elif verdict.startswith("OTHER_FIBER") and r["hdr_obscmnt"] and f"fib" in r["hdr_obscmnt"].lower() \
@@ -48,6 +52,8 @@ for r in inv:
                 "MATCH_BUT_SECOND_FIBER": "data check: the stated fiber is brightest but another fiber has a comparable signal"}.get(
             verdict.split("(")[0], f"data check: the brightest trace is fiber {r['data_brightest_fiber']}, the stated fiber "
                                     f"{fiber} is only second (ratio {r['second_over_first']})")
+    if target in REASSIGNED.get(mjd, {}):
+        note = (note + "; " if note else "") + REASSIGNED[mjd][target]
     rows.append(dict(
         mjd=mjd, exposure=e, plate=r["almanac_plate"], fiber=fiber, target=target.rstrip("?"), action=action,
         fiber_source=r["fiber_source"], data_verdict=verdict, data_brightest_fiber=r["data_brightest_fiber"],

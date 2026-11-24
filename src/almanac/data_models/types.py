@@ -66,13 +66,10 @@ ImageType = Annotated[
 #: other patch of sky, so the assigned target's identity does not apply to it.
 OFF_TARGET_CATEGORY = "offtarget"
 
-#: Category given by an exposure override (`almanac.overrides`) to a fiber that
-#: saw a named object with no catalogue entry (a solar-system body, e.g. an
-#: asteroid placed on the fiber by hand). The name is in the fiber's
-#: `override_target`; its `sdss_id` is set by the override
-#: (`solar_system_sdss_id` of `almanac/etc/handplaced_targets.yaml`), never by
-#: the cross-match. A hand-placed *star* instead becomes `science` with the
-#: star's own targeting information and is cross-matched normally.
+#: Former category of a fiber that an exposure override says saw a named object
+#: with no catalogue entry. Kept so that older files and tests validate; almanac
+#: no longer assigns it: hand-placed objects (stars and solar-system bodies) are
+#: `science`, with `override_target` / `override_kind` saying what they are.
 RETARGETED_CATEGORY = "retargeted"
 
 Category = Annotated[

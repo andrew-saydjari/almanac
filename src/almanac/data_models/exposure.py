@@ -82,6 +82,7 @@ class Exposure(BaseModel):
     _original_config_id: Optional[int] = None
     _override_table_id: Optional[int] = None
     _override_table_group: Optional[tuple] = None
+    _header_pointing: Optional[tuple] = None
 
     @computed_field(description="Exposure string used in path")
     def exposure_string(self) -> str:

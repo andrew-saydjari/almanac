@@ -95,7 +95,9 @@ class TestParsing:
         assert vesta[0].exposures == (19, 22, 23, 29)
         # The Vesta exposures with no light on an identified fiber are not_science.
         bad = [e for e in entries if e.id == "apo-55755-aadaf-vesta-unconfirmed"]
-        assert bad and bad[0].action == "not_science" and bad[0].exposures == (20, 21, 33)
+        assert bad and bad[0].action == "not_science" and bad[0].exposures == (20, 21)
+        f295 = [e for e in entries if e.id == "apo-55755-aadaf-vesta-f295"]
+        assert f295[0].exposures == (32, 33)
         for e in entries:
             assert e.source_quote and e.source_file and e.reason
 
@@ -207,17 +209,22 @@ class TestApply:
         # must still be written, with sdss_ids, by the first unaffected exposure.
         assert e2.fiber_map_key == "5099"
         assert [t.sdss_id for t in e2.targets] == [1001, 1002, 1003, -1]
-        # Edited exposures get their own fiber-table ID in plate_id, one per entry set.
-        assert e1.plate_id == e3.plate_id == 1005755001 and e1.fiber_map_key == "1005755001"
-        assert e4.plate_id == 1005755002 and e4.fiber_map_key == "1005755002"
+        # Edited exposures get their own fiber-table ID in plate_id: one per entry
+        # set, except that each exposure with a solar-system body (VESTA in the
+        # packaged targets file) gets its own, holding its own position.
+        assert e1.plate_id == 1005755001 and e1.fiber_map_key == "1005755001"
+        assert e3.plate_id == 1005755002
+        assert e4.plate_id == 1005755003 and e4.fiber_map_key == "1005755003"
         assert e1.original_plate_id == e4.original_plate_id == e2.plate_id == 5099
 
         t = {x.fiber_id: x for x in e1.targets}
-        # A solar-system body: no catalogue identity, sdss_id = solar_system_sdss_id.
-        assert t[2].category == RETARGETED_CATEGORY and t[2].override_target == "VESTA"
+        # A solar-system body: reduced as science, no catalogue identity,
+        # sdss_id = solar_system_sdss_id, never cross-matched.
+        assert t[2].category == "science" and t[2].override_target == "VESTA"
+        assert t[2].override_kind == "solar_system"
         assert t[2].sdss_id == 0 and t[2].original_category == "science" and t[2].override_id == "vesta"
         assert t[2].twomass_designation == "" and t[2].catalogid == -1
-        assert t[2].ra != t[2].ra and t[2].dec != t[2].dec  # NaN: no fixed position
+        assert t[2].ra != t[2].ra and t[2].dec != t[2].dec  # NaN: mock exposure has no raw header
         for f in (1, 3):
             assert t[f].category == OFF_TARGET_CATEGORY and t[f].sdss_id == -1 and t[f].override_id == "vesta"
         assert t[4].category == "sky_apogee" and t[4].override_id == ""
@@ -281,7 +288,8 @@ class TestApply:
             assert [x.decode() for x in fp["exposures/fiber_map_key"][:]] == ["5099", "1005755001"]
             assert list(fp["exposures/plate_id"][:]) == [5099, 1005755001]
             assert list(fp["exposures/original_plate_id"][:]) == [5099, 5099]
-            assert fp["fibers/category"][0].decode() == RETARGETED_CATEGORY
+            assert fp["fibers/category"][0].decode() == "science"
+            assert fp["fibers/override_kind"][0].decode() == "solar_system"
             assert fp["fibers/override_target"][0].decode() == "VESTA"
 
 

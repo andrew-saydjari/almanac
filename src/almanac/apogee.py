@@ -1263,9 +1263,14 @@ def get_almanac_data(
                     lookup["twomass_psc"] = twomass_sdss_id_lookup(remaining)
 
             # Add sdss_id to targets
+            from almanac.overrides import skip_cross_match
             for i in xmatch_indices:
                 exposure = exposures[i]
                 for target in exposure.targets:
+                    if skip_cross_match(target):
+                        # A solar-system body placed on the fiber by an
+                        # override: its sdss_id was set there.
+                        continue
                     if not assigns_sdss_id(target.category):
                         # Don't assign sdss_id to unplugged targets, or to
                         # off-target fibers: the positioner never reached
