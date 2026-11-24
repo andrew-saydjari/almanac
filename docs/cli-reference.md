@@ -209,6 +209,19 @@ What can happen to a requested night of `almanac`:
 Without `--output` the same statuses apply. The two categories that cannot be told apart
 reliably are kept together: `NIGHT_EXCEPTION` covers bad input and bugs alike.
 
+### File locking
+
+HDF5 locks the output file while it is open, so a second process writing the same file is
+refused. Because the file is opened once per night, an open can briefly find the lock of the
+previous (just closed) session not yet released, which happens on Ceph, where the lock
+release after a close is asynchronous. The open is therefore retried with exponential backoff
+(0.1 s doubling, at most 10 s apart, about 60 s in total), each retry logged as a warning and
+counted in the summary (`lock retries`, `/run_summary` `last_run_n_lock_retries`); only then
+does the night fail as `WRITE_FAILED`. A lock held longer (a real second writer) is still
+refused. A build that is known to be the only writer of its file may set
+`HDF5_USE_FILE_LOCKING=FALSE` to skip locking altogether (then nothing protects the file from
+a second writer).
+
 ### Stopping a run
 
 SIGINT (Ctrl-C), SIGTERM (`kill PID`, and what a Slurm time limit sends first) and SIGHUP

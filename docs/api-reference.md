@@ -110,7 +110,9 @@ writes a list of `get_almanac_data` results to a file.
 
 ### `open_for_writing(path)`
 Context manager: open an almanac file in `"a"` mode for one write session (HDF5
-metadata-cache evictions disabled), flushed and closed at the end. The commands that build
+metadata-cache evictions disabled), flushed and closed at the end. The open goes through
+`open_h5_retrying(path, mode, budget=None)`, which retries while the HDF5 file lock is
+taken (`LOCK_RETRY_BUDGET` 60 s, backoff from 0.1 s to 10 s). The commands that build
 files write each night in its own session, so a killed run leaves a readable file.
 `read_pending_missing`, `add_pending_missing`, `set_pending_missing` maintain
 `/missing_exposures_pending`; `write_run_summary(fp, rows, attrs, replace_keys)` and

@@ -6,6 +6,13 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* Opening the output for a night's write session is retried while the HDF5 file lock is
+  taken (``io.open_h5_retrying``: 0.1 s doubling, at most 10 s apart, about 60 s in total,
+  each retry logged; counted in ``last_run_n_lock_retries``), and only then does the night
+  fail as ``WRITE_FAILED``. On Ceph a reopen right after a close could find the previous
+  session's lock not yet released. Also used by ``add fibers``, ``lookup -O`` and the in-place
+  ``add metadata`` write. A real second writer is still refused; single-writer builds may set
+  ``HDF5_USE_FILE_LOCKING=FALSE``.
 * Arc-lamp sequences (``sequences/arclamps``) no longer start or end with darks, and darks
   alone are no longer a sequence; darks between two arc lamps (same dither) still do not
   break a run. Changes ``sequences/arclamps`` in built files (nothing in

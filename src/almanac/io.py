@@ -355,6 +355,63 @@ def write_missing_exposures(fp, rows, replace_keys=None):
     return group
 
 
+#: Total time [s] `open_h5_retrying` keeps retrying an open that fails
+#: because the HDF5 file lock is taken, and its first delay / largest delay.
+LOCK_RETRY_BUDGET = 60.0
+LOCK_RETRY_FIRST_DELAY = 0.1
+LOCK_RETRY_MAX_DELAY = 10.0
+
+#: Number of lock retries in this process (reported by the main command).
+lock_retry_count = 0
+
+
+def is_lock_error(exception) -> bool:
+    """True for HDF5's "unable to lock file" (EAGAIN / EWOULDBLOCK) open error."""
+    import errno
+
+    return (
+        getattr(exception, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK)
+        or "unable to lock file" in str(exception)
+    )
+
+
+def open_h5_retrying(path, mode="a", budget=None, _open=None, _sleep=None):
+    """
+    `h5py.File(path, mode)`, retrying for up to `budget` seconds
+    (`LOCK_RETRY_BUDGET`, 60 s) with exponential backoff (0.1 s doubling, at
+    most 10 s apart) while the open fails because the HDF5 file lock is held.
+
+    On Ceph (a FUSE file system here) the lock of a just-closed handle is
+    released asynchronously by the file system, so reopening the file right
+    after closing it can briefly find the lock still taken. Each retry is
+    logged at warning level with its attempt number. A real second writer
+    keeps the lock for longer than the budget, so it is still refused (the
+    last error is raised). Other errors are raised at once.
+    """
+    import time
+    from almanac import logger
+
+    global lock_retry_count
+    _open = _open or h5.File
+    _sleep = _sleep or time.sleep
+    budget = LOCK_RETRY_BUDGET if budget is None else budget
+    delay, waited, attempt = LOCK_RETRY_FIRST_DELAY, 0.0, 1
+    while True:
+        try:
+            return _open(path, mode)
+        except OSError as e:
+            if not is_lock_error(e) or waited + delay > budget:
+                raise
+            logger.warning(
+                f"{path}: file lock taken (attempt {attempt}; {e}); retrying in {delay:.1f} s"
+            )
+            lock_retry_count += 1
+            _sleep(delay)
+            waited += delay
+            attempt += 1
+            delay = min(delay * 2, LOCK_RETRY_MAX_DELAY)
+
+
 @contextmanager
 def open_for_writing(path):
     """
@@ -369,9 +426,10 @@ def open_for_writing(path):
     when the session is closed; the window in which a kill can damage the
     file is the close itself. (A night that replaces one already in the file
     can reuse the old night's space within the session, so a kill during that
-    session can damage that one night.)
+    session can damage that one night.) The open is retried while the file
+    lock is taken (`open_h5_retrying`).
     """
-    fp = h5.File(path, "a")
+    fp = open_h5_retrying(path, "a")
     try:
         try:
             config = fp.id.get_mdc_config()

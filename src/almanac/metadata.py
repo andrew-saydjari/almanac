@@ -638,7 +638,9 @@ def _write_final(input_path, output_path, columns, descriptions, extras, attrs):
 
     # In place: build under temporary names, then swap the links.
     names = [(META_GROUP, META_TMP_GROUP)] + [(g, f"{g}__tmp") for g in extras]
-    with h5.File(input_path, "a") as fp:
+    from almanac.io import open_h5_retrying
+
+    with open_h5_retrying(input_path, "a") as fp:
         for _, tmp in names:
             if tmp in fp:
                 del fp[tmp]

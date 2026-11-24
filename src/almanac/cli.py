@@ -639,6 +639,9 @@ def main(
                 not_processed=max(
                     0, n_requested - n_skipped - len(done_keys | failed_keys)
                 ),
+                # Opens of the output retried because its lock was briefly
+                # taken (see io.open_h5_retrying); not a problem by itself.
+                lock_retries=io.lock_retry_count,
             )
 
             if output:

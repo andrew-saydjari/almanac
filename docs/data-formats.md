@@ -539,6 +539,7 @@ successfully is removed), with the counts of the last run as attributes.
 | `last_run_n_database_error` | Failed, category `database_error` |
 | `last_run_n_write_failed` | Failed, category `write_failed` |
 | `last_run_n_pool_broken` | Failed, category `pool_broken` |
+| `last_run_n_lock_retries` | Opens of the file retried because its lock was briefly taken (not a problem by itself; see the CLI reference) |
 | `last_run_exit_status_name` | Name of the exit status (`almanac.exit_codes.ExitStatus`, or `SIGTERM` etc. for 128 + signal) |
 | `last_run_exit_status` | Exit status of the run (see [exit status](cli-reference.md#fault-tolerance-and-exit-status)) |
 | `last_run_finished_utc` | When the run finished (UTC, ISO 8601) |
