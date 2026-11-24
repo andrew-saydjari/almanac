@@ -6,6 +6,8 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* ``postprocess`` no longer stops with a ``NameError`` (``unknown_carton_pks``, left from the
+  old metadata code; unknown cartons are recorded by ``add metadata`` on ``/meta``).
 * ``config set`` converts the value to the key's declared type (int, float, bool, str, list)
   and refuses a value that does not fit; the hidden ``config update`` alias no longer
   crashes (it called the builtin ``set``). ``config.set_config_value``, ``coerce_value``.

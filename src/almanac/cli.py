@@ -1873,9 +1873,6 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
                     star_fields, star_dict, fp, callback=callback(tid_write_stars)
                 )
 
-    if unknown_carton_pks:
-        click.echo(f"Warning: {len(unknown_carton_pks):,} unknown cartons encountered")
-
     # Last check point for fields
     expected = set(spectrum_fields)
     actual = set(data_dict.keys())

@@ -435,8 +435,7 @@ Upstream's post-reduction summary: from an almanac file decorated with `add meta
 and the arMADGICS outputs found relative to it (`<dir of INPUT>/../arMADGICS/...`), it
 writes `<OUTPUT_PREFIX>exposures.h5` and `<OUTPUT_PREFIX>stars.h5` with barycentric
 corrections, moon and airmass metadata, and shadow heights. The fork's pipelines do not
-use it. After writing both files it stops with a `NameError` (`unknown_carton_pks`).
-`--processes` defaults to the CPU budget, as for `almanac`.
+use it. `--processes` defaults to the CPU budget, as for `almanac`.
 
 ## `almanac flag`
 
