@@ -402,9 +402,9 @@ almanac lookup IDENTIFIER [IDENTIFIER ...] [--output FILE]
 Finds where SDSS-V targets were observed: each IDENTIFIER is an `sdss_id` or a
 `catalogid`; every catalogid of the matching `sdss_id` is looked up in `targetdb`
 (assignments with status 1) and the matching exposures are printed as a table (FPS era
-only). It first prints one `Success`/`Failed` line per `targetdb` model it probes. With
-`--output`, every night found is written to FILE with fiber mappings (cross-matched, with
-overrides), but without the per-night attributes and without `/missing_exposures`.
+only). With `--output`, every night found is written to FILE as `almanac --fibers` writes
+it (cross-matched, with overrides, with the night attributes), but without
+`/missing_exposures`.
 
 ## `almanac pgdump` and `almanac pgrestore`
 

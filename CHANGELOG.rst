@@ -6,6 +6,8 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* ``lookup`` no longer prints debug ``Success``/``Failed`` lines, and ``lookup -O`` writes
+  nights as ``almanac --fibers`` does, night attributes included (``io.write_night_attrs``).
 * ``dump``: ``exposures``/``fibers`` (and ``postprocess``) work on files with one observatory;
   ``dump fibers`` rows carry ``mjd`` and ``fiber_map_key`` and a filled ``observatory`` (FITS
   output works); ``dump stars`` writes HDF5 and no longer pools fibers without an

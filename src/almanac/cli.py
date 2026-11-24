@@ -692,9 +692,35 @@ def main(
         ctx.exit(exit_status)
 
 
+def _lookup_night_writer(output):
+    """
+    For `almanac lookup -O`: a function `(observatory, mjd)` that builds the
+    night as `almanac --fibers` does (overrides on, cross-matched) and writes
+    it to `output` with the same writers, night attributes included
+    (`io.write_night_attrs`), in its own write session.
+    """
+    from almanac import apogee, io
+    from almanac.overrides import load_overrides, overrides_attrs
+
+    load_overrides()
+    override_attrs = overrides_attrs(True)
+    _source, lookup_attrs, _full = apogee.prepare_cross_match(True)
+
+    def write_night(observatory, mjd):
+        observatory, mjd, exposures, sequences, _missing = apogee.get_almanac_data(
+            observatory, mjd, fibers=True, meta=True
+        )
+        with io.open_for_writing(output) as fp:
+            io.update(fp, observatory, mjd, exposures, sequences, fibers=True, compression=False)
+            io.write_night_attrs(fp, observatory, mjd, override_attrs, lookup_attrs)
+
+    return write_night
+
+
 @main.command()
 @click.argument("identifiers", type=int, nargs=-1)
-@click.option("--output", "-O", default=None, type=str, help="Output file")
+@click.option("--output", "-O", default=None, type=str,
+              help="Also write the nights with matching exposures to this almanac file (as `almanac --fibers`)")
 def lookup(identifiers, output, **kwargs):
     """Lookup target(s) by catalog or SDSS identifier."""
 
@@ -748,7 +774,7 @@ def lookup(identifiers, output, **kwargs):
             f"Identifiers {identifiers} not found in SDSS-V database"
         )
 
-    # todo hacky
+    # The targetdb models are declared without their schema.
     for m in (
         Target,
         Observatory,
@@ -760,13 +786,6 @@ def lookup(identifiers, output, **kwargs):
         Design,
         DesignToField,
     ):
-        try:
-            m.get()
-        except:
-            print(f"Failed {m}")
-        else:
-            print(f"Success {m}")
-
         m._meta.schema = "targetdb"
 
     q = (
@@ -821,44 +840,43 @@ def lookup(identifiers, output, **kwargs):
         rich_table.add_column(field_name, justify="center")
 
     done = set()
-    io_kwds = dict(fibers=True, compression=False)
-    with h5.File(output, "a") if output else nullcontext() as fp:
+    if output:
+        # Nights written with -O are built exactly as `almanac --fibers` builds
+        # them, night attributes included.
+        write_night = _lookup_night_writer(output)
 
-        i = 1
-        with Live(rich_table, console=console, refresh_per_second=4) as live:
-            for exposure in chain(*starmap(get_exposures, fields.keys())):
-                key = (exposure.observatory, exposure.mjd)
-                field_ids = fields[key]
+    i = 1
+    with Live(rich_table, console=console, refresh_per_second=4) as live:
+        for exposure in chain(*starmap(get_exposures, fields.keys())):
+            key = (exposure.observatory, exposure.mjd)
+            field_ids = fields[key]
 
-                if output and key not in done:
-                    done.add(key)
-                    observatory_, mjd_, exposures_, sequences_, _missing = (
-                        get_almanac_data(*key, fibers=True, meta=True)
-                    )
-                    io.update(fp, observatory_, mjd_, exposures_, sequences_, **io_kwds)
+            if output and key not in done:
+                done.add(key)
+                write_night(*key)
 
-                if exposure.field_id in field_ids:
-                    for target in exposure.targets:
-                        if target.catalogid in catalogids:
-                            rich_table.add_row(
-                                *list(
-                                    map(
-                                        str,
-                                        (
-                                            i,
-                                            exposure.observatory,
-                                            exposure.mjd,
-                                            exposure.exposure,
-                                            exposure.field_id,
-                                            target.fiber_id,
-                                            target.catalogid,
-                                            catalogids[target.catalogid],
-                                        ),
-                                    )
+            if exposure.field_id in field_ids:
+                for target in exposure.targets:
+                    if target.catalogid in catalogids:
+                        rich_table.add_row(
+                            *list(
+                                map(
+                                    str,
+                                    (
+                                        i,
+                                        exposure.observatory,
+                                        exposure.mjd,
+                                        exposure.exposure,
+                                        exposure.field_id,
+                                        target.fiber_id,
+                                        target.catalogid,
+                                        catalogids[target.catalogid],
+                                    ),
                                 )
                             )
-                            i += 1
-                            break
+                        )
+                        i += 1
+                        break
     if output:
         console.print(f"Updated {output} with:")
         for obs, mjd in done:
