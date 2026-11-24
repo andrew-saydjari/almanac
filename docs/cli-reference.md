@@ -138,8 +138,12 @@ run with the same command then processes only the missing nights.
 - **Example**: `almanac --mjd-start 59300 --mjd-end 60300 --fibers -O big.h5 --skip-existing`
 
 #### `-v`, `--verbosity`
-Repeatable. No flag: log messages only. `-v`: a live full-screen progress display. `-vv`:
-also print the exposure table of every night at the end.
+Repeatable. No flag: log messages, and the [progress bars](#progress-bars) on a terminal.
+`-v`: a live full-screen display of the nights done (the bars are shown under it on a
+terminal). `-vv`: also print the exposure table of every night at the end.
+
+#### `--no-progress`
+Never draw the [progress bars](#progress-bars) (also `ALMANAC_NO_PROGRESS=1`).
 
 ### Parallelism
 
@@ -209,6 +213,32 @@ What can happen to a requested night of `almanac`:
 Without `--output` the same statuses apply. The two categories that cannot be told apart
 reliably are kept together: `NIGHT_EXCEPTION` covers bad input and bugs alike.
 
+### Progress bars
+
+On a terminal, `almanac`, `add metadata`, `add fibers`, `dump` and `postprocess` draw live
+progress bars: for each step its description, done/total in its own unit (nights, ids,
+batches, bytes), the rate, the elapsed time and an ETA. The main command shows the nights
+processed and, with `--output`, the nights written. With `--skip-existing` the nights
+already in the file count as done but not in the rate.
+
+The bars are drawn **only when both standard output and standard error are terminals**.
+A run whose output goes to a file or a pipe (`... >> log 2>&1`, `nohup`, a
+Slurm job) draws nothing: its log is exactly what it is without bars (no carriage returns
+or cursor movements; `-v` behaves as before). They are also off with `--no-progress` (an
+option of each of these commands) or with the environment variable `ALMANAC_NO_PROGRESS`
+set to anything but `0` or the empty string, and with `TERM=dumb`.
+
+While the bars are drawn, log messages, `add metadata`'s timestamped lines and the output
+of the worker processes are printed above them. The bars never replace a log line:
+everything a run logs without them it also logs with them. They are updated once per
+night, batch or chunk, and redrawn a few times a second by a separate thread, so they do
+not slow the run. On SIGINT, SIGTERM or SIGHUP they are closed (cursor shown again) before
+the run reports and exits as described in [Stopping a run](#stopping-a-run).
+
+Steps without a bar: a single database query or write (the APOGEE ID lookup, the
+`--full-apogee-id-lookup` query, the final write of `/meta`, `pgdump`/`pgrestore`) and
+`lookup`, which shows its results table as they arrive instead.
+
 ### File locking
 
 HDF5 locks the output file while it is open, so a second process writing the same file is
@@ -272,7 +302,12 @@ reading.
 every night in INPUT with an exposures table); `--output`/`-O`, `--in-place`;
 `--no-x-match`; `--no-overrides` (the nights must have been built without overrides);
 `--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes`/`-p` and
-`--query-workers` (as for `almanac`). There is no British-spelling alias for `add fibers`.
+`--query-workers` (as for `almanac`); `--no-progress`. There is no British-spelling alias
+for `add fibers`.
+
+**Progress bars** (on a terminal, see [Progress bars](#progress-bars)): copying INPUT to
+`--output` (bytes), reading the stored exposures (nights), and adding the fiber mappings
+(nights).
 
 **Exit status**: 1 if no night is selected; otherwise the highest of the
 [exit statuses](#fault-tolerance-and-exit-status) of its problems (5 refused, 6 exception,
@@ -321,6 +356,14 @@ continues from the finished batches; failed batches are re-run after a backoff
 checkpoint made for a different `sdss_id` set, batch size, or `--extended` setting is
 refused (`--fresh` discards it). The checkpoint directory is removed after the final write
 unless `--keep-checkpoint`.
+
+**Progress.** Every finished batch logs a timestamped line (ids done, recent rate, ETA)
+and rewrites `progress.json`. On a terminal there are also
+[progress bars](#progress-bars) (`--no-progress` turns them off): reading the fiber
+mappings (nights), querying the catalog (ids, starting from the ids already in the
+checkpoint when resuming; only finished batches move it, so a failed or retried batch
+never moves it back, and a retry in progress is shown next to it), assembling `/meta`
+(batches) and the final write.
 
 **Atomic final write.** `/meta` is assembled once all batches are done. With `--output` the
 file is written under a temporary name and renamed; in place, the group is written as
@@ -399,7 +442,7 @@ See [Configuration](configuration.md) for every key.
 ## `almanac dump`
 
 ```bash
-almanac dump stars|exposures|fibers INPUT OUTPUT [--format fits|csv|hdf5] [--overwrite]
+almanac dump stars|exposures|fibers INPUT OUTPUT [--format fits|csv|hdf5] [--overwrite] [--no-progress]
 ```
 
 Write a summary table of an almanac file. The format is taken from `--format`/`-f` or the
@@ -423,7 +466,8 @@ without `--overwrite`.
   night's for every row.
 - `dump visits`: not implemented (does nothing).
 
-A file may hold one observatory only, and nights without fiber tables are skipped.
+A file may hold one observatory only, and nights without fiber tables are skipped. On a
+terminal a [progress bar](#progress-bars) counts the nights read.
 
 ## `almanac lookup`
 
@@ -459,14 +503,15 @@ files are skipped and counted.
 ## `almanac postprocess`
 
 ```bash
-almanac postprocess INPUT OUTPUT_PREFIX [--processes N] [--limit N]
+almanac postprocess INPUT OUTPUT_PREFIX [--processes N] [--limit N] [--no-progress]
 ```
 
 Upstream's post-reduction summary: from an almanac file decorated with `add metadata`
 and the arMADGICS outputs found relative to it (`<dir of INPUT>/../arMADGICS/...`), it
 writes `<OUTPUT_PREFIX>exposures.h5` and `<OUTPUT_PREFIX>stars.h5` with barycentric
 corrections, moon and airmass metadata, and shadow heights. The fork's pipelines do not
-use it. `--processes` defaults to the CPU budget, as for `almanac`.
+use it. `--processes` defaults to the CPU budget, as for `almanac`. Its steps are shown
+as [progress bars](#progress-bars) on a terminal only.
 
 ## `almanac flag`
 
@@ -504,6 +549,8 @@ almanac --mjd 55755 --apo --fibers --no-overrides -O without.h5
 - `PGPASSFILE`, `PGPORT` and the other libpq variables: read by the PostgreSQL client
   (the database password normally comes from `~/.pgpass`).
 - `HOME`: the configuration file is `$HOME/.almanac/config.yaml`.
+- `ALMANAC_NO_PROGRESS`: any value but `0` or the empty string turns the
+  [progress bars](#progress-bars) off (as `--no-progress`).
 
 ## Shell completion
 

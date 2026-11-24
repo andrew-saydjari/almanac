@@ -6,6 +6,15 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* Live progress bars (``almanac.progress.TaskDisplay``) on a terminal: the main command
+  (nights processed; nights written with ``--output``; ``--skip-existing`` nights count as
+  done), ``add metadata`` (fiber mappings read, catalog query in ids starting from the
+  checkpoint when resuming and never moving back on a retry, assembly, final write),
+  ``add fibers`` (copy, stored exposures, nights), ``dump`` and ``postprocess``. Drawn only
+  when standard output and standard error are terminals; a run writing to a file or pipe
+  (``>> log 2>&1``, ``nohup``) logs exactly as before. Off with ``--no-progress`` or
+  ``ALMANAC_NO_PROGRESS=1``. Log lines and worker output are printed above the bars.
+  ``TaskDisplay`` moved from ``almanac.display`` (still importable there).
 * Opening the output for a night's write session is retried while the HDF5 file lock is
   taken (``io.open_h5_retrying``: 0.1 s doubling, at most 10 s apart, about 60 s in total,
   each retry logged; counted in ``last_run_n_lock_retries``), and only then does the night

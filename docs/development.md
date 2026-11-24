@@ -38,7 +38,8 @@ almanac/
 │   ├── metadata.py          # `add metadata` (checkpoints, /meta)
 │   ├── catalog.py           # catalog queries behind /meta
 │   ├── qa.py                # bad_exposures.csv lookup
-│   ├── display.py           # rich progress display and tables
+│   ├── display.py           # rich calendar display and tables
+│   ├── progress.py          # live progress bars (TaskDisplay), terminal only
 │   ├── logger.py, utils.py
 │   ├── data_models/         # Pydantic models: Exposure, FPSTarget, PlateTarget,
 │   │                        #   Source/ExtendedSource, types

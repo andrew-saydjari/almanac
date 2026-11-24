@@ -24,7 +24,8 @@ almanac/
 ├── metadata.py          # `almanac add metadata`
 ├── catalog.py           # catalog queries behind /meta
 ├── qa.py                # known-bad exposure list
-├── display.py           # rich display
+├── display.py           # rich display (calendar, exposure tables)
+├── progress.py          # live progress bars (TaskDisplay), terminal only
 ├── logger.py, utils.py
 ├── data_models/         # Exposure, FPSTarget, PlateTarget, Source, ExtendedSource, types
 └── postprocess/         # helpers of `almanac postprocess`

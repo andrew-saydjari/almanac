@@ -108,6 +108,14 @@ almanac.parallel module
    :undoc-members:
    :show-inheritance:
 
+almanac.progress module
+-----------------------
+
+.. automodule:: almanac.progress
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 almanac.qa module
 -----------------
 

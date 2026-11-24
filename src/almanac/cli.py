@@ -132,9 +132,26 @@ def _run_summary(counts, failed, db_unavailable_keys, exit_status):
         )
 
 
+#: `--no-progress` of the commands that draw live progress bars (almanac.progress).
+_no_progress_option = click.option(
+    "--no-progress", is_flag=True,
+    help=(
+        "Never draw live progress bars (drawn only when standard output and standard "
+        "error are terminals; also off with ALMANAC_NO_PROGRESS=1)"
+    ),
+)
+
+
 @click.group(invoke_without_command=True)
 @click.option("-v", "--verbosity", count=True,
               help="Verbosity: -v live progress display; -vv also the exposure table of every night")
+@click.option(
+    "--no-progress", is_flag=True,
+    help=(
+        "Never draw live progress bars (they are drawn only when standard output and "
+        "standard error are terminals; also off with ALMANAC_NO_PROGRESS=1)"
+    ),
+)
 @click.option(
     "--mjd",
     default=None,
@@ -211,6 +228,7 @@ def _run_summary(counts, failed, db_unavailable_keys, exit_status):
 def main(
     ctx,
     verbosity,
+    no_progress,
     mjd,
     mjds,
     mjd_start,
@@ -265,13 +283,32 @@ def main(
 
     display = ObservationsDisplay(mjd_min, mjd_max, observatories)
 
+    # Progress bars (almanac.progress), on a terminal only: their own live
+    # block, or, with -v, a row under the full-screen calendar. Off a terminal
+    # nothing changes (the calendar display of -v is drawn as before).
+    from almanac.progress import TaskDisplay, progress_enabled
+
+    show_bars = progress_enabled(no_progress)
+    bars = TaskDisplay(enabled=show_bars, live=show_bars and verbosity < 1)
+    bar_nights = bars.add_task("Processing nights", total=n_requested, unit="nights")
+    bar_write = (
+        bars.add_task("Writing nights", total=0, unit="nights") if output else None
+    )
+
+    def _view():
+        if show_bars:
+            from rich.console import Group
+
+            return Group(display.create_display(), bars.renderable())
+        return display.create_display()
+
     buffered_critical_logs = []
     buffered_result_rows = []
 
     refresh_per_second = 1
     context_manager = (
         Live(
-            display.create_display(), refresh_per_second=refresh_per_second, screen=True
+            _view(), refresh_per_second=refresh_per_second, screen=True
         )
         if verbosity >= 1
         else nullcontext()
@@ -305,7 +342,9 @@ def main(
     pending_before = set()  # nights left pending by an earlier run
     writer = None
 
-    with stop:
+    # `bars` is closed (its live block stopped, the terminal restored) before
+    # the signal handlers are, and before the run summary is logged.
+    with stop, bars:
         try:
             if output:
                 with io.open_for_writing(output) as fp:
@@ -323,6 +362,7 @@ def main(
                             else:
                                 kept.append((mjd, observatory))
                         n_skipped = len(tasks) - len(kept)
+                        bars.set_initial(bar_nights, n_skipped)
                         if n_skipped:
                             logger.info(
                                 f"Skipping {n_skipped} observatory/MJD pairs already "
@@ -368,9 +408,11 @@ def main(
                         )
                         io.add_pending_missing(fp_w, observatory_w, mjd_w)
                     written_keys.add((observatory_w, mjd_w))
+                    bars.advance(bar_write)
 
                 def _on_write_error(item, exception):
                     observatory_w, mjd_w = item[:2]
+                    bars.advance(bar_write)
                     logger.error(f"Failed to write {observatory_w}/{mjd_w}: {exception}")
                     failed.append((observatory_w, mjd_w, "write_failed", str(exception)))
 
@@ -389,6 +431,7 @@ def main(
                 full_apogee_id_lookup=full_apogee_id_lookup,
             )
 
+            bars.start_task(bar_nights)  # the rate and ETA count from here
             with context_manager as live:
                 if processes > 1:
 
@@ -495,6 +538,10 @@ def main(
                                         display.completed[observatory].add(v)
                                         results.append(result)
                                         if writer is not None:
+                                            bars.update_task(
+                                                bar_write,
+                                                total=bars.tasks[bar_write].total + 1,
+                                            )
                                             writer.submit(
                                                 observatory,
                                                 mjd,
@@ -502,11 +549,12 @@ def main(
                                                 sequences,
                                             )
 
+                                bars.advance(bar_nights)
                                 if (
                                     live is not None
                                     and (time() - t) > 1 / refresh_per_second
                                 ):
-                                    live.update(display.create_display())
+                                    live.update(_view())
                                     t = time()
 
                                 try:
@@ -576,6 +624,9 @@ def main(
                                 display.completed[observatory].add(v)
                                 results.append(result)
                                 if writer is not None:
+                                    bars.update_task(
+                                        bar_write, total=bars.tasks[bar_write].total + 1
+                                    )
                                     writer.submit(
                                         observatory,
                                         mjd,
@@ -583,12 +634,13 @@ def main(
                                         sequences,
                                     )
 
+                        bars.advance(bar_nights)
                         if live is not None and (time() - t) > 1 / refresh_per_second:
-                            live.update(display.create_display())
+                            live.update(_view())
                             t = time()
 
                 if live is not None:
-                    live.update(display.create_display())
+                    live.update(_view())
                     if verbosity <= 1 and output is None:
                         sleep(3)
 
@@ -607,6 +659,7 @@ def main(
                 # are already processed, and the queue is short) and stop the
                 # writer thread before this thread opens the file again.
                 writer.close(drain=True)
+                bars.complete(bar_write)
 
             # End-of-run accounting (see `_run_exit_status`).
             failed_keys = {(o, m) for o, m, _, _ in failed}
@@ -968,6 +1021,32 @@ def _add_fibers_task(observatory, mjd, exposures, xmatch, overrides):
     return observatory, mjd, exposures, sequences
 
 
+def _copy_file(source, destination, bars=None, chunk_size=64 * 1024 * 1024):
+    """
+    Copy ``source`` to ``destination`` (contents only, as `shutil.copyfile`).
+    With progress bars drawn (``bars.enabled``), copy in chunks and show the
+    bytes copied; otherwise use `shutil.copyfile` itself.
+    """
+    import os
+    import shutil
+
+    if bars is None or not bars.enabled:
+        shutil.copyfile(source, destination)
+        return
+    task = bars.add_task(
+        f"Copying {os.path.basename(source)}", total=os.path.getsize(source), as_bytes=True
+    )
+    bars.start_task(task)
+    with open(source, "rb") as fsrc, open(destination, "wb") as fdst:
+        while True:
+            chunk = fsrc.read(chunk_size)
+            if not chunk:
+                break
+            fdst.write(chunk)
+            bars.advance(task, len(chunk))
+    bars.complete(task)
+
+
 @add.command()
 @click.argument("input_path", type=str)
 @click.option("--mjd", default=None, type=int,
@@ -996,10 +1075,11 @@ def _add_fibers_task(observatory, mjd, exposures, xmatch, overrides):
               help="Worker processes (one observatory/MJD each). Default and meaning as for `almanac`.")
 @click.option("--query-workers", default=None, type=int,
               help="Most worker processes that hold a database connection at once (as for `almanac`).")
+@_no_progress_option
 def fibers(
     input_path, mjd, mjds, mjd_start, mjd_end, date, date_start, date_end, apo, lco,
     output_path, in_place, no_x_match, no_overrides, full_apogee_id_lookup,
-    live_apogee_id_join, processes, query_workers, **kwargs,
+    live_apogee_id_join, processes, query_workers, no_progress=False, **kwargs,
 ):
     """Add fiber mappings (cross-matched) to an almanac file built without --fibers.
 
@@ -1060,9 +1140,17 @@ def fibers(
         logger.warning(f"No nights with an exposures table selected in {input_path}")
         sys.exit(1)
 
+    from almanac.progress import TaskDisplay, progress_enabled
+
+    # Progress bars on a terminal only (almanac.progress); closed before the
+    # signal handlers are restored and before the end-of-run report.
+    # The copy and the reading are shown in a transient block; the full list
+    # of bars is drawn again while the nights are processed.
+    bars = TaskDisplay(enabled=progress_enabled(no_progress))
     target = input_path
     if output_path:
-        shutil.copyfile(input_path, output_path)
+        with bars.session(transient=True):
+            _copy_file(input_path, output_path, bars)
         target = output_path
         logger.info(f"Copied {input_path} to {output_path}; adding fiber mappings to the copy")
 
@@ -1106,11 +1194,15 @@ def fibers(
 
     # Read every night's stored exposures up front, with the file closed again
     # before any worker is forked (workers never hold its descriptor or lock).
-    with h5.File(target, "r") as fp:
-        task_args = [
-            (observatory, mjd, io.read_exposures(fp, observatory, mjd), xmatch, not no_overrides)
-            for observatory, mjd in nights
-        ]
+    bar_read = bars.add_task("Reading stored exposures", total=len(nights), unit="nights")
+    bar_nights = bars.add_task("Adding fiber mappings", total=len(nights), unit="nights")
+    with bars.session(transient=True), h5.File(target, "r") as fp:
+        task_args = []
+        for observatory, mjd in nights:
+            task_args.append(
+                (observatory, mjd, io.read_exposures(fp, observatory, mjd), xmatch, not no_overrides)
+            )
+            bars.advance(bar_read)
 
     def _process_and_write(observatory, mjd, get_result):
         """Run (or collect) one night and write it, classifying a failure."""
@@ -1133,6 +1225,8 @@ def fibers(
         except Exception as e:
             logger.exception(f"Failed to write the fibers of {observatory}/{mjd}: {e}")
             failed.append((observatory, mjd, "write_failed", str(e)))
+        finally:
+            bars.advance(bar_nights)
 
     from almanac.signals import GracefulStop
 
@@ -1140,7 +1234,7 @@ def fibers(
     # written, exit with 128 + the signal number (see `almanac.signals`).
     stop = GracefulStop()
     interrupted = None
-    with stop:
+    with stop, bars:
         try:
             if processes > 1:
                 mp_context = multiprocessing.get_context()
@@ -1275,6 +1369,14 @@ def fibers(
         "and SDSS-IV APOGEE (DR17) targeting flags. 8 more queries per batch (slower)."
     ),
 )
+@click.option(
+    "--no-progress", is_flag=True,
+    help=(
+        "Never draw live progress bars. They are drawn only when standard output and "
+        "standard error are terminals (also off with ALMANAC_NO_PROGRESS=1); the "
+        "timestamped log lines and <checkpoint>/progress.json are written either way."
+    ),
+)
 def metadata(
     input_path,
     mjd,
@@ -1298,6 +1400,7 @@ def metadata(
     max_batch_attempts,
     retry_backoff,
     extended,
+    no_progress=False,
     **kwargs,
 ):
     """Add astrometry, photometry and targeting flags (/meta) for every sdss_id.
@@ -1338,24 +1441,29 @@ def metadata(
         f"(from {query_workers_resolved[1]}); one database connection each"
         + (" (0: queries run in this process)" if query_workers == 0 else "")
     )
+    from almanac.progress import TaskDisplay, progress_enabled
+
     try:
-        build_metadata(
-            input_path,
-            output_path=output_path,
-            since=since,
-            restrict_to=restrict_to,
-            observatories=observatories,
-            mjds=mjds,
-            query_workers=query_workers,
-            batch_size=batch_size,
-            checkpoint_dir=checkpoint_dir,
-            fresh=fresh,
-            keep_checkpoint=keep_checkpoint,
-            retry_not_found=retry_not_found,
-            max_batch_attempts=max_batch_attempts,
-            retry_backoff=retry_backoff,
-            extended=extended,
-        )
+        # The bars close (terminal restored) before an error is reported.
+        with TaskDisplay(enabled=progress_enabled(no_progress)) as bars:
+            build_metadata(
+                input_path,
+                output_path=output_path,
+                since=since,
+                restrict_to=restrict_to,
+                observatories=observatories,
+                mjds=mjds,
+                query_workers=query_workers,
+                batch_size=batch_size,
+                checkpoint_dir=checkpoint_dir,
+                fresh=fresh,
+                keep_checkpoint=keep_checkpoint,
+                retry_not_found=retry_not_found,
+                max_batch_attempts=max_batch_attempts,
+                retry_backoff=retry_backoff,
+                extended=extended,
+                progress=bars,
+            )
     except MetadataBuildError as e:
         if e.exit_status is None:
             raise click.ClickException(str(e))
@@ -1516,7 +1624,8 @@ def flag(ctx, almanac_path, observatory, mjd, exposure, chip):
 @click.option(
     "--limit", default=None, type=int, help="Limit number of spectra (for testing)"
 )
-def postprocess(input_path, output_prefix, processes, limit, **kwargs):
+@_no_progress_option
+def postprocess(input_path, output_prefix, processes, limit, no_progress, **kwargs):
     """Post-process an existing Almanac file after reductions are complete."""
 
     if not input_path or not output_prefix:
@@ -1533,7 +1642,7 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
     from glob import glob
     from collections import defaultdict
 
-    from almanac.display import TaskDisplay
+    from almanac.progress import TaskDisplay, progress_enabled
     from almanac.data_models.source import Source
     from almanac.data_models.spectrum import Spectrum
     from almanac.utils import adjusted_fiber_index_to_fiber_id
@@ -1564,7 +1673,7 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
     arMADGICS_dir = f"{outdir}/arMADGICS/wu_th_{arMADGICS_suffix}/"
     arMADGICS_paths = glob(f"{arMADGICS_dir}/arMADGICS_out_*.h5")
 
-    with TaskDisplay() as display:
+    with TaskDisplay(enabled=progress_enabled(no_progress)) as display:
         with ProcessPoolExecutor(max_workers=processes) as executor:
 
             tid_almanac = display.add_task("Loading Almanac data", total=1)
@@ -2285,14 +2394,24 @@ def check_paths_and_format(input_path, output_path, given_format, overwrite):
     return given_format
 
 
-def _iter_nights(fp, observatories=("apo", "lco")):
+def _iter_nights(fp, observatories=("apo", "lco"), progress=None):
     """(observatory, mjd, group) for every `raw/<obs>/<mjd>` in an almanac file
-    (a file may hold one observatory only), in observatory and MJD order."""
-    for observatory in observatories:
-        if f"raw/{observatory}" not in fp:
-            continue
-        for mjd in sorted(fp[f"raw/{observatory}"], key=int):
-            yield observatory, int(mjd), fp[f"raw/{observatory}/{mjd}"]
+    (a file may hold one observatory only), in observatory and MJD order.
+    ``progress``: a `TaskDisplay` to show a "Reading nights" bar on."""
+    keys = [
+        (observatory, mjd)
+        for observatory in observatories
+        if f"raw/{observatory}" in fp
+        for mjd in sorted(fp[f"raw/{observatory}"], key=int)
+    ]
+    task = None
+    if progress is not None:
+        task = progress.add_task("Reading nights", total=len(keys), unit="nights")
+        progress.start_task(task)
+    for observatory, mjd in keys:
+        yield observatory, int(mjd), fp[f"raw/{observatory}/{mjd}"]
+        if task is not None:
+            progress.advance(task)
 
 
 def _concatenate_column(parts):
@@ -2334,7 +2453,8 @@ def _write_columns(output_path, output_format, data, overwrite):
     help="Output format",
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
-def stars(input_path, output_path, overwrite, format, **kwargs):
+@_no_progress_option
+def stars(input_path, output_path, overwrite, format, no_progress=False, **kwargs):
     """Create a star-level summary file (one row per sdss_id; FITS, CSV or HDF5)
 
     \b
@@ -2367,8 +2487,11 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
 
     output_format = check_paths_and_format(input_path, output_path, format, overwrite)
     n_without_sdss_id = 0
-    with h5.File(input_path, "r") as fp:
-        for observatory, mjd, group in _iter_nights(fp):
+    from almanac.progress import TaskDisplay, progress_enabled
+
+    bars = TaskDisplay(enabled=progress_enabled(no_progress))
+    with bars, h5.File(input_path, "r") as fp:
+        for observatory, mjd, group in _iter_nights(fp, progress=bars):
 
             is_object = group["exposures/image_type"][:].astype(str) == "object"
             fps = is_object * (group["exposures/config_id"][:] > 0)
@@ -2475,7 +2598,8 @@ def visits(input_path, output_path, format, overwrite, **kwargs):
     help="Output format",
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
-def exposures(input_path, output_path, format, overwrite, **kwargs):
+@_no_progress_option
+def exposures(input_path, output_path, format, overwrite, no_progress=False, **kwargs):
     """Create an exposure-level summary file"""
 
     import os
@@ -2491,8 +2615,11 @@ def exposures(input_path, output_path, format, overwrite, **kwargs):
     for field_name, field_spec in fields.items():
         data[field_name] = []
 
-    with h5.File(input_path, "r") as fp:
-        for observatory, mjd, night in _iter_nights(fp):
+    from almanac.progress import TaskDisplay, progress_enabled
+
+    bars = TaskDisplay(enabled=progress_enabled(no_progress))
+    with bars, h5.File(input_path, "r") as fp:
+        for observatory, mjd, night in _iter_nights(fp, progress=bars):
             if "exposures" not in night:
                 continue
             group = night["exposures"]
@@ -2524,7 +2651,8 @@ def exposures(input_path, output_path, format, overwrite, **kwargs):
     help="Output format",
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
-def fibers(input_path, output_path, format, overwrite, **kwargs):
+@_no_progress_option
+def fibers(input_path, output_path, format, overwrite, no_progress=False, **kwargs):
     """Create a fiber-level summary file (one row per fiber of every fiber table)
 
     \b
@@ -2552,8 +2680,11 @@ def fibers(input_path, output_path, format, overwrite, **kwargs):
     }
 
     parts = {"mjd": [], "fiber_map_key": [], **{name: [] for name in fields}}
-    with h5.File(input_path, "r") as fp:
-        for observatory, mjd, night in _iter_nights(fp):
+    from almanac.progress import TaskDisplay, progress_enabled
+
+    bars = TaskDisplay(enabled=progress_enabled(no_progress))
+    with bars, h5.File(input_path, "r") as fp:
+        for observatory, mjd, night in _iter_nights(fp, progress=bars):
             if "fibers" not in night:
                 continue
             for key in night["fibers"]:
