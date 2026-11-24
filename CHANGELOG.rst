@@ -4,6 +4,32 @@
 Change Log
 ==========
 
+0.5.3
+-----
+Sync with upstream sdss/almanac 0.5.2 (``a922dee``), merged into the fork; the version is one
+past upstream's.
+
+* ``almanac add metadata`` stops with exit code 1 and writes nothing (no ``/meta``, no output
+  file, no checkpoint) when none of the selected nights has fiber mappings; previously it
+  wrote an empty ``/meta``. Nights without fiber mappings are counted in a warning and skipped.
+  Adapted from upstream #66; the check lives in ``almanac.metadata.build_metadata``.
+* Fixed the ``Exposure.prefix`` validator, which raised when ``prefix`` was passed
+  explicitly as ``None`` (upstream #66).
+* The target cross-match is now ``almanac.apogee.cross_match_targets`` and the fiber writer
+  ``almanac.io.write_fibers`` (function boundaries from upstream #66). Both keep the fork's
+  bodies: targeted APOGEE ID lookups through the maintainers' table, best rank then smallest
+  ``sdss_id``, no ``sdss_id`` for unplugged or off-target fibers, and exposure-override keys.
+  Outputs are unchanged.
+* Lock refresh to upstream's dependabot versions: requests 2.33.0, pygments 2.20.0,
+  pytest 9.0.3 (with pytest-asyncio 1.4.0), urllib3 2.7.0, idna 3.15, cryptography 50.0.0,
+  pillow 12.3.0, soupsieve 2.8.4.
+* Not taken from upstream: ``almanac add fibers`` (and the readers ``io.read_exposures`` /
+  ``io.read_sequences`` that only it uses), the unpopulated ``ebv*`` ``Source`` fields, and
+  default-on value-added queries (the fork has them as ``add metadata --extended``).
+
+0.4.3 (fork, unreleased changes)
+--------------------------------
+
 * Parallelism defaults are consistent and Slurm-aware. ``--processes``/``-p`` (main command,
   ``postprocess``) defaults to the CPU budget: ``SLURM_CPUS_ON_NODE`` in a Slurm job (or the
   CPU affinity if smaller), else ``sched_getaffinity``, else ``os.cpu_count()``; the main

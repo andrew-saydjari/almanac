@@ -83,32 +83,49 @@ def update(
             _print(f"\traw/{observatory}/{mjd}/sequences/{image_type}")
 
     if fibers:
-        fibers_group = get_or_create_group(fp, f"raw/{observatory}/{mjd}/fibers")
-        done = set()
-        for exposure in exposures:
-            # Normally the configuration (FPS) or plate ID; an exposure
-            # override that edits fibers gives the exposure its own key.
-            reference_id_string = exposure.fiber_map_key
-            if reference_id_string in done:
-                # Check `done` BEFORE touching `exposure.targets`: `targets`
-                # is a lazy property, and for exposures whose configuration
-                # has already been written, accessing it would re-parse the
-                # confSummary/plugmap yanny files only to discard the result.
-                # Workers pre-compute (and pickle) targets for the exposures
-                # that are actually written, so this ordering keeps the
-                # parent process from redoing ~seconds of parsing per night.
-                continue
+        write_fibers(fp, observatory, mjd, exposures, verbose=verbose)
 
-            if not exposure.targets:
-                continue
 
-            delete_hdf5_entry(fibers_group, reference_id_string)
-            write_models_to_hdf5_group(
-                exposure.targets,
-                fibers_group.create_group(reference_id_string, track_order=True)
-            )
-            done.add(reference_id_string)
-            _print(f"\traw/{observatory}/{mjd}/fibers/{reference_id_string}")
+def write_fibers(fp, observatory, mjd, exposures, verbose: bool = False):
+    """
+    Write the fiber-to-target mappings for one observatory and MJD to
+    `raw/{observatory}/{mjd}/fibers/{key}`, one group per configuration (FPS
+    era) or plate (plate era); an exposure override that edits fibers gives
+    its exposure its own key (`Exposure.fiber_map_key`). Existing groups for
+    the same key are replaced.
+
+    Only the first exposure of each key is consulted, and only exposures
+    whose `targets` have been populated (see
+    `almanac.apogee.cross_match_targets`) are written.
+    """
+    _print = print if verbose else lambda *args, **kwargs: None
+
+    fibers_group = get_or_create_group(fp, f"raw/{observatory}/{mjd}/fibers")
+    done = set()
+    for exposure in exposures:
+        # Normally the configuration (FPS) or plate ID; an exposure
+        # override that edits fibers gives the exposure its own key.
+        reference_id_string = exposure.fiber_map_key
+        if reference_id_string in done:
+            # Check `done` BEFORE touching `exposure.targets`: `targets`
+            # is a lazy property, and for exposures whose configuration
+            # has already been written, accessing it would re-parse the
+            # confSummary/plugmap yanny files only to discard the result.
+            # Workers pre-compute (and pickle) targets for the exposures
+            # that are actually written, so this ordering keeps the
+            # parent process from redoing ~seconds of parsing per night.
+            continue
+
+        if not exposure.targets:
+            continue
+
+        delete_hdf5_entry(fibers_group, reference_id_string)
+        write_models_to_hdf5_group(
+            exposure.targets,
+            fibers_group.create_group(reference_id_string, track_order=True)
+        )
+        done.add(reference_id_string)
+        _print(f"\traw/{observatory}/{mjd}/fibers/{reference_id_string}")
 
 
 

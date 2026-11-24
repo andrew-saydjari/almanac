@@ -175,6 +175,9 @@ measured ~660 ids/s cold DB-local versus 13--26k ids/s warm, and are slow throug
 tunnel (about 0.27 s per cold id on one connection). Run it on a host local to the SDSS
 database (e.g. at Utah) when you can.
 
+If the file has no fiber mappings for the selected nights, `almanac add metadata` exits with
+status 1 without writing anything: build the file with `--fibers` first.
+
 ## Configuration
 
 You can view and change the `almanac` configuration settings through the `almanac config` interface. To view all current settings and to see the configuration file path:

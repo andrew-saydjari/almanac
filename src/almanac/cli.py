@@ -831,6 +831,9 @@ def metadata(
 
     Finished batches are checkpointed; re-running the same command resumes.
     The final /meta is written in one step (temporary file or group, then rename).
+
+    INPUT must contain fiber mappings (built with --fibers). If none of the
+    selected nights has them, nothing is written and the exit code is 1.
     """
     from almanac import utils, config
     from almanac.metadata import build_metadata, MetadataBuildError
