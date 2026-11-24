@@ -49,7 +49,8 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
 
 
 @click.group(invoke_without_command=True)
-@click.option("-v", "--verbosity", count=True, help="Verbosity level")
+@click.option("-v", "--verbosity", count=True,
+              help="Verbosity: -v live progress display; -vv also the exposure table of every night")
 @click.option(
     "--mjd",
     default=None,
@@ -68,7 +69,8 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
 @click.option("--apo", is_flag=True, help="Query Apache Point Observatory data")
 @click.option("--lco", is_flag=True, help="Query Las Campanas Observatory data")
 @click.option(
-    "--fibers", "--fibres", is_flag=True, help="Include fibre mappings to targets"
+    "--fibers", "--fibres", is_flag=True,
+    help="Include the fiber-to-target mappings (cross-matched to sdss_id unless --no-x-match)"
 )
 @click.option(
     "--no-x-match", is_flag=True, help="Do not cross-match targets with SDSS-V database"
@@ -94,7 +96,7 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
     "--live-apogee-id-join",
     is_flag=True,
     help=(
-        "Never read the APOGEE ID -> SDSS ID materialized view "
+        "Never read the APOGEE ID -> SDSS ID lookup table "
         "(config `apogee_id_lookup_view`); always use the live database join"
     ),
 )
@@ -760,7 +762,7 @@ def _add_fibers_task(observatory, mjd, exposures, xmatch, overrides):
 @click.option("--full-apogee-id-lookup", is_flag=True,
               help="Build the full APOGEE ID -> SDSS ID lookup once up front (as for `almanac`)")
 @click.option("--live-apogee-id-join", is_flag=True,
-              help="Never read the APOGEE ID -> SDSS ID materialized view (as for `almanac`)")
+              help="Never read the APOGEE ID -> SDSS ID lookup table (as for `almanac`)")
 @click.option("--processes", "-p", default=None, type=int,
               help="Worker processes (one observatory/MJD each). Default and meaning as for `almanac`.")
 @click.option("--query-workers", default=None, type=int,
@@ -1144,10 +1146,12 @@ def _postprocess_chunk_worker(args):
 @click.pass_context
 def flag(ctx, almanac_path, observatory, mjd, exposure, chip):
     """
-    Flag bad exposures.
+    Not implemented: parses exposures and prints them; nothing is flagged.
 
-    You can call this for single exposures (or a chip of an exposure), or you
-    can pipe in a list of exposures from stdin:
+    Exposures are flagged through almanac/etc/bad_exposures.csv and the
+    not_science exposure overrides (the flagged_bad column). The intended
+    interface takes a single exposure (or a chip of an exposure), or a list
+    of exposures piped in from stdin:
 
     \b
     >> head bad_exposures.txt
@@ -1787,10 +1791,11 @@ def pgdump(output_dir, host, user, database, extended=False, **kwargs):
 def pgrestore(output_dir, host, database, user, port, **kwargs):
     """Restore dumped PostgreSQL tables from OUTPUT_DIR into a target database.
 
-    Reads the .dump files produced by `almanac pgdump` and restores each
-    one in turn. Schemas are created in the target database automatically
-    if they do not already exist. Tables that cannot be restored are
-    skipped and reported at the end.
+    Reads the .dump files produced by `almanac pgdump` for the base table
+    list (PGDUMP_TABLES; the `pgdump --extended` tables are not restored)
+    and restores each one in turn. Schemas are created in the target
+    database automatically if they do not already exist. Tables that are
+    missing or cannot be restored are skipped and reported at the end.
     """
 
     import os
@@ -2041,7 +2046,7 @@ def check_paths_and_format(input_path, output_path, given_format, overwrite):
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
 def stars(input_path, output_path, overwrite, format, **kwargs):
-    """Create a star-level summary file"""
+    """Create a star-level summary file (one row per sdss_id; FITS or CSV)"""
 
     import h5py as h5
     import numpy as np
@@ -2152,7 +2157,7 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
 def visits(input_path, output_path, format, overwrite, **kwargs):
-    """Create a visit-level summary file"""
+    """Not implemented: does nothing (no visit-level summary is written)."""
 
     pass
 

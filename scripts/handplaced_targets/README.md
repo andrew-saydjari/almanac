@@ -19,12 +19,12 @@ are written by hand above the block and use the same targets file.
 
 ## How almanac uses them
 
-`almanac.apogee.get_almanac_data` applies `retarget_fibers` **before** the
-cross-match: each affected exposure gets a copy of its plate's fiber table in
+`almanac.apogee.process_night` (run by `almanac --fibers` and by `almanac add fibers`)
+applies `retarget_fibers` **before** the cross-match: each affected exposure gets a copy of its plate's fiber table in
 which the named fiber's row is rewritten from the targets file (category
 `science`, the star's designation, ra, dec; `original_category`,
-`override_id`, `override_target` record the change) and the other fibers become
-`offtarget`. The ordinary cross-match then runs on that copy, so the star gets
+`override_id`, `override_target`, `override_kind` record the change) and, with
+`other_fibers: offtarget` (every shipped entry), the other fibers become `offtarget`. The ordinary cross-match then runs on that copy, so the star gets
 its `sdss_id` through the same lookups as any plugged fiber (DR17 allStar
 APOGEE ID lookup, then 2MASS PSC; or the catalogid lookup), and
 `almanac add metadata` picks the `sdss_id` up from the edited table like any

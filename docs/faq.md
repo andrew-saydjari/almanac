@@ -6,177 +6,95 @@ Common questions and troubleshooting for `almanac`.
 
 ### Q: I'm getting "command not found" after installation
 
-**A:** This usually means the installation directory isn't in your PATH, or there was an installation issue.
+**A:** The `almanac` script is installed into the environment's `bin` directory. Run it
+through the environment (`uv run almanac` in a checkout synced with `uv sync`), or
+activate the environment. To check the installed package:
 
-**Solutions:**
 ```bash
-# Check if almanac is installed
-python -c "import almanac; print(almanac.__version__)"
-
-# If installed but not in PATH, find it:
-python -c "import almanac; print(almanac.__file__)"
-
-# Try reinstalling:
-uv pip install --force-reinstall git+https://github.com/sdss/almanac
-
-# Or add to PATH (example path):
-export PATH="$HOME/.local/bin:$PATH"
+uv run python -c "import almanac; print(almanac.__version__, almanac.__file__)"
 ```
 
-### Q: How do I install at Utah?
+### Q: Which package do I install?
 
-**A:** At Utah, use the module system:
-```bash
-module load almanac
-```
-
-If you need a specific Python environment:
-```bash
-module load miniconda/3.8.5_astra
-module load almanac
-```
-
-### Q: The installation fails with dependency conflicts
-
-**A:** Try using `uv` for better dependency resolution:
-```bash
-# Install uv first
-pip install uv
-
-# Use uv to install almanac
-uv pip install git+https://github.com/sdss/almanac
-```
+**A:** This fork, from git (see [Installation](installation.md)). The `sdss-almanac`
+package on PyPI is upstream's and lacks the fork's changes (exposure overrides,
+hand-placed targets, `add fibers`, the resumable `add metadata`, ...). Python 3.11 or newer
+is required.
 
 ## Database Connection Issues
 
-### Q: "Unable to connect to SDSS database" error
+### Q: "Unable to connect to SDSS database"
 
-**A:** This is a common issue outside Utah. Check these solutions:
+**A:**
+1. **Check the settings**: `almanac config show` (host, port, user).
+2. **Through an SSH tunnel**: `sdssdb.host` must be `localhost` and `sdssdb.port` the local
+   end of the tunnel, and the tunnel must be up.
+3. **Password**: the PostgreSQL client reads it from `~/.pgpass`, or from the file named by
+   `PGPASSFILE` (needed when your home directory is not where the file is). The entry must
+   match host, port and user.
+4. **Elsewhere**: your address must be allowed to reach the SDSS database.
 
-1. **Verify your IP is whitelisted** for SDSS database access
-2. **Check network connectivity**:
-   ```bash
-   ping operations.sdss.org
-   ```
-3. **Test with reduced functionality**:
-   ```bash
-   almanac --mjd -1 --no-x-match
-   ```
-4. **Check configuration**:
-   ```bash
-   almanac config show
-   almanac config get sdssdb.host
-   ```
+### Q: The database connection is slow
 
-### Q: Database connection is very slow
-
-**A:** Adjust the timeout warning:
-```bash
-almanac config set database_connect_time_warning 10
-```
-
-Or check if you're using the correct database host:
-```bash
-almanac config set sdssdb.host closer-database-mirror.org
-```
+**A:** almanac warns when connecting takes longer than `database_connect_time_warning`
+seconds; raise it to silence the warning (`almanac config set database_connect_time_warning 10`).
+For `almanac add metadata`, run on a host local to the database (see the
+[User Guide](user-guide.md#adding-catalog-metadata)).
 
 ### Q: Can I use almanac without database access?
 
-**A:** Limited functionality is available without database access:
-```bash
-# This will work but with limited target information
-almanac --mjd -1 --no-x-match
-
-# Raw exposure data doesn't require database
-almanac --mjd -1
-```
+**A:** Partly. The exposures are read from the raw files, so `almanac --mjd 60000` still
+writes the exposures table and sequences, but without the operations database the
+missing-exposures report records `db_unavailable`, and without the catalog database fiber
+tables have no `sdss_id`. Files for the pipeline must be built with the database.
 
 ## Data and File Access
 
-### Q: "No raw data found" or similar errors
+### Q: "No raw data found", or nights come back empty
 
-**A:** `almanac` needs access to raw APOGEE data files:
+**A:** almanac reads the raw frames under the `apogee_dir` setting, and the plate,
+plugmap and `confSummary` files under `platelist_dir`, `mapper_dir` and `sdsscore_dir`.
+The defaults are the Utah paths; elsewhere, point them at your copies
+(`almanac config set apogee_dir <path>`). A night with no raw files is reported as having
+no data and is not written.
 
-1. **At Utah**: Data should be automatically available
-2. **Elsewhere**: Set up Globus transfer or mount the data filesystem
-3. **Check data paths**: Verify the data directories are accessible
+### Q: Why are nights before MJD 59558 not checked against the database?
 
-### Q: How do I access data from many years ago?
-
-**A:** Historical data availability depends on:
-- **Data archive access**: Older data may need special access
-- **Database coverage**: Very old data may not be in the current database
-- **MJD limits**: Check minimum MJD settings:
-  ```bash
-  almanac config get sdssdb_exposure_min_mjd.apo
-  almanac config get sdssdb_exposure_min_mjd.lco
-  ```
+**A:** The operations database is asked which exposures exist only from
+`sdssdb_exposure_min_mjd` (59558 at both observatories). Earlier nights get the
+disk-based part of the missing-exposures report only (`hole`).
 
 ### Q: Output files are very large
 
-**A:** Control file size with:
-```bash
-# Save to smaller file
-almanac --mjd -1 --output smaller.h5
-
-# Skip fiber data if not needed
-almanac --mjd-start -30 --output no-fibers.h5
-
-# Use date ranges instead of large ranges
-almanac --date-start 2024-01-01 --date-end 2024-01-31 --output jan.h5
-```
+**A:** Fiber tables are the bulk of a file. Leave out `--fibers` when you only need the
+exposures (you can add them later with `almanac add fibers`), and split long ranges into
+several files.
 
 ## Usage and Commands
 
 ### Q: What's the difference between --mjd and --date?
 
-**A:** 
-- **--mjd**: Uses Modified Julian Date (astronomical standard)
-  - Example: `--mjd 59300`
-  - Supports relative values: `--mjd -1` (yesterday)
-- **--date**: Uses calendar dates in UTC
-  - Example: `--date 2021-01-01`
-  - More intuitive for specific dates
-
-### Q: How do I query a specific month or year?
-
 **A:**
-```bash
-# Specific month
-almanac --date-start 2024-01-01 --date-end 2024-01-31
-
-# Entire year
-almanac --date-start 2024-01-01 --date-end 2024-12-31
-
-# Using MJD (if you know them)
-almanac --mjd-start 59300 --mjd-end 59330
-```
+- **--mjd**: the SDSS MJD of the night (`--mjd 59300`); negative values count back from the
+  current MJD (`--mjd -1` is last night).
+- **--date**: the same night given as a date (`--date 2021-01-01`).
 
 ### Q: What do the verbosity levels do?
 
 **A:**
-- **No flag**: Minimal output (just summary)
-- **-v**: Shows progress bars and basic information
-- **-vv**: Shows progress bars plus detailed exposure tables
-
-```bash
-almanac --mjd -1      # Just summary
-almanac --mjd -1 -v   # With progress
-almanac --mjd -1 -vv  # With full details
-```
+- **No flag**: log messages only
+- **-v**: a live full-screen progress display
+- **-vv**: the progress display, then the exposure table of every night
 
 ### Q: How do I save data to a file?
 
 **A:**
 ```bash
-# Save to HDF5 file
 almanac --mjd -1 --output results.h5
-
-# Files are incremental - you can append:
-almanac --mjd -2 --output results.h5  # Adds to same file
+almanac --mjd -2 --output results.h5  # adds that night to the same file
 ```
 
-### Q: How do I resume an interrupted query?
+### Q: How do I resume an interrupted run?
 
 **A:** Re-run the same command with `--skip-existing`:
 
@@ -184,69 +102,72 @@ almanac --mjd -2 --output results.h5  # Adds to same file
 almanac --mjd-start 59300 --mjd-end 60300 --output big.h5 --fibers --skip-existing
 ```
 
-Observatory/MJD pairs already present in the output file are skipped, so only missing (or previously failed) nights are processed. Nights that fail are recorded and listed at the end of the run instead of aborting it, so a re-run with `--skip-existing` retries exactly the failed pairs.
+Nights already in the output file are skipped, so only missing (or previously failed)
+nights are processed. Failed nights are listed at the end of a run, which still exits with
+status 0.
 
 ## Data Interpretation
 
 ### Q: What does "missing exposures" mean?
 
-**A:** `almanac` detects gaps in exposure sequences by comparing the files on disk against the exposure numbers known to the operations database. This could indicate:
-- **Technical issues**: Instrument problems during observations
-- **Weather**: Observations stopped due to poor conditions  
-- **Scheduled breaks**: Intentional gaps in observing
-- **Data processing**: Exposures not yet processed or archived
-
-When writing to an output file, every missing exposure is recorded in the run-level `/missing_exposures` table with a reason code (`hole`, `trailing`, `db_no_file`, `file_no_db`, or `db_unavailable`) so you can audit a run before downstream processing. See [Data Formats](data-formats.md) for the schema and reason-code definitions.
+**A:** An exposure number with no raw file. `almanac` fills it in the exposures table
+(`image_type = "missing"`) so that row `i` is always exposure `i`, and, when writing a file,
+records it in `/missing_exposures` with a reason code (`hole`, `trailing`, `db_no_file`,
+`file_no_db`, or `db_unavailable`) from comparing the files on disk with the exposures the
+operations database knows. See [Data Formats](data-formats.md#missing-exposures-report).
 
 ### Q: What are "sequences"?
 
-**A:** Sequences are groups of consecutive exposures that form logical observational units, typically:
-- **Science sequences**: Multiple exposures of the same target/field
-- **Calibration sequences**: Sets of calibration exposures
-- **Standard star sequences**: Observations of standard stars
+**A:** Three lists of (first, last) exposure-number ranges per night:
+
+- `objects`: runs of consecutive object exposures on the same field, plate and
+  configuration. These are the visits: the first exposure of each is the one whose fiber
+  targets are cross-matched to `sdss_id`.
+- `arclamps`: runs of arc lamp exposures at the same dither position (darks in between
+  do not break a run; runs of darks are listed too).
+- `missing`: runs of missing exposure numbers.
+
+ApogeeReduction.jl does not read them; it uses the exposures table and the fiber tables.
+See [Data Formats](data-formats.md#sequences).
+
+### Q: Why does an exposure have a `plate_id` above 1,000,000,000?
+
+**A:** An exposure override edited its fibers (a hand-placed star or Vesta), so it has its
+own fiber table under that synthetic ID. The plate it was taken with is in
+`original_plate_id`. See [Exposure Overrides](exposure-overrides.md).
+
+### Q: Why is a fiber's category `offtarget`?
+
+**A:** Either its FPS positioner was assigned a target but did not reach it, or an
+exposure override says the telescope was pointed away from the plate. Its original
+category is in `original_category`, and it has no `sdss_id`.
 
 ### Q: What's the difference between plates and FPS?
 
 **A:**
-- **Plates (SDSS-IV)**: Fixed fiber positions drilled into metal plates
-- **FPS (SDSS-V)**: Robotic fiber positioners that can be reconfigured
+- **Plates (SDSS-IV and earlier)**: fibers plugged into holes drilled in aluminum plates;
+  fiber tables keyed by `plate_id`.
+- **FPS (SDSS-V)**: robotic fiber positioners reconfigured for each field; fiber tables
+  keyed by `config_id`.
 
-Use different column options for each:
-```bash
-# Get all available data for plate-based and FPS observations
-almanac --fibers --mjd -1
-```
-
-## Performance and Optimization
+## Performance
 
 ### Q: almanac is running slowly
 
-**A:** Try these optimizations:
-
-1. **Use parallel processing**:
-   ```bash
-   almanac --processes 4 --mjd-start -7
-   ```
-
-2. **Skip cross-matching when not needed**:
-   ```bash
-   almanac --mjd -1 --fibers --no-x-match
-   ```
-
-3. **Limit date ranges**:
-   ```bash
-   # Instead of a full year, try monthly chunks
-   almanac --date-start 2024-01-01 --date-end 2024-01-31
-   ```
-
-4. **Select only needed columns**:
-   ```bash
-   almanac --mjd-start -7
-   ```
+**A:**
+1. **Use more processes** on a node with spare CPUs (`--processes`), keeping
+   `--query-workers` small.
+2. **Use the maintainers' APOGEE ID lookup table**: it is used automatically when
+   `catalogdb.mv_apogee_id_to_sdss_id` is readable (check the `APOGEE ID lookup:` log line).
+3. **Split long ranges** and use `--skip-existing`.
 
 ### Q: How many processes should I use?
 
-**A:** Usually the default. Without `--processes`, almanac uses the CPU budget of the job: `SLURM_CPUS_ON_NODE` inside a Slurm job, otherwise the CPUs the process may run on. The database load is capped separately by `--query-workers` (default: the `catalog_query_max_workers` setting, 4). On a shared login node, pass a small `--processes` explicitly.
+**A:** Usually the default. Without `--processes`, almanac uses the CPU budget of the job:
+`SLURM_CPUS_ON_NODE` inside a Slurm job, otherwise the CPUs the process may run on. The
+database load is capped separately by `--query-workers` (default: the
+`catalog_query_max_workers` setting, 4). On a shared login node, pass a small
+`--processes` explicitly.
 
 ```bash
 almanac --processes 4 --mjd-start -7
@@ -254,131 +175,46 @@ almanac --processes 4 --mjd-start -7
 
 ## Configuration Issues
 
-### Q: How do I reset my configuration?
+### Q: Where is the configuration, and how do I reset it?
 
-**A:**
-```bash
-# Find config file location
-almanac config show
-
-# Remove config file (it will be recreated with defaults)
-rm ~/.config/almanac/config.yaml
-```
+**A:** `~/.almanac/config.yaml` (printed by `almanac config show`). Delete it to get the
+defaults back; it is recreated on the next run.
 
 ### Q: My configuration changes aren't taking effect
 
 **A:**
-1. **Check the config file location**:
-   ```bash
-   almanac config show
-   ```
-
-2. **Verify the setting was saved**:
-   ```bash
-   almanac config get your_setting_name
-   ```
-
-3. **Check for YAML syntax errors** in the config file
-
-4. **Restart your shell** after major configuration changes
-
-### Q: Can I have different configurations for different projects?
-
-**A:** Yes, by managing config files manually:
-```bash
-# Save current config
-cp ~/.config/almanac/config.yaml ~/project1-config.yaml
-
-# Switch configurations
-cp ~/project2-config.yaml ~/.config/almanac/config.yaml
-```
+1. Check the path printed by `almanac config show`.
+2. Check the value with `almanac config get <key>`.
+3. Check the YAML syntax of the file.
 
 ## Error Messages
 
-### Q: "Permission denied" errors
+### Q: `OverrideError`
 
-**A:**
-- **File permissions**: Check write permissions for output directories
-- **Data access**: Verify access to raw data directories
-- **Config file**: Check write permissions for config directory
+**A:** The exposure override file, or the hand-placed targets file, is malformed or does
+not match the data (for example an entry names an exposure that does not exist). The
+message names the entry. See [Exposure Overrides](exposure-overrides.md).
 
-### Q: "Module not found" errors
+### Q: `add fibers` refuses a night
 
-**A:** Usually indicates incomplete installation:
-```bash
-# Reinstall in development mode
-pip install -e .
+**A:** The exposures or sequences that the current code and override list produce for that
+night differ from the stored ones (the message lists the differences). Rebuild the night
+with `almanac`.
 
-# Or regular install
-pip install git+https://github.com/sdss/almanac
-```
+### Q: `add metadata` says there are no fiber mappings
 
-### Q: Memory errors with large queries
-
-**A:**
-- **Reduce date range**: Query smaller time periods
-- **Skip fiber data**: Remove `--fibers` flag if not needed
-- **Use streaming**: Process data in smaller chunks
-- **Increase swap space**: If on your own system
-
-## Data Quality and Validation
-
-### Q: How do I verify my results are correct?
-
-**A:**
-1. **Cross-check with known observations**:
-   ```bash
-   almanac --mjd 60000 -vv  # Use a known good MJD
-   ```
-
-2. **Compare observatories**:
-   ```bash
-   almanac --apo --mjd -1
-   almanac --lco --mjd -1
-   ```
-
-3. **Check sequence patterns**:
-   ```bash
-   almanac --mjd -1
-   ```
-
-### Q: Some targets show "N/A" or missing information
-
-**A:** This is normal when:
-- **Cross-matching disabled**: Use without `--no-x-match`
-- **Database incomplete**: Some targets may not be in the database
-- **Historical data**: Older observations may have less complete information
+**A:** The file was built without `--fibers`. Run `almanac add fibers` (or rebuild with
+`--fibers`) first. Nothing was written.
 
 ## Getting Help
 
-### Q: None of these solutions work for my issue
+### Q: How do I report a bug?
 
-**A:** Get help through:
+**A:** Open an issue on the fork's GitHub repository with:
 
-1. **GitHub Issues**: [Report bugs or request features](https://github.com/sdss/almanac/issues)
-2. **Verbose output**: Run with `-vv` and include output in your report
-3. **System information**: Include your OS, Python version, and installation method
-4. **Configuration**: Include output from `almanac config show`
-
-### Q: How do I report a bug effectively?
-
-**A:** Include in your bug report:
 ```bash
-# System information
-almanac --version  # (if available)
+uv run python -c "import almanac; print(almanac.__version__)"
 python --version
-uname -a
-
-# Configuration
-almanac config show
-
-# Error reproduction
-almanac --mjd -1 -vv  # Whatever command fails
+almanac config show         # remove anything private first
+almanac --mjd 60000 --apo -vv   # the command that fails, and its log
 ```
-
-### Q: Is there a user community or forum?
-
-**A:** 
-- **GitHub Discussions**: For questions and community discussions
-- **SDSS Collaboration**: Internal SDSS communication channels
-- **Documentation**: This documentation and the main README

@@ -1327,7 +1327,8 @@ def get_almanac_data(
         See `cross_match_targets`.
     :param overrides: [optional]
         Apply the exposure overrides in `almanac/etc/exposure_overrides.yaml`
-        (see `almanac.overrides`). This is the only place they are applied.
+        (see `almanac.overrides`). They are applied in `process_night`, the
+        only place they are applied.
 
     :returns:
         Tuple containing:

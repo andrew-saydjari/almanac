@@ -27,7 +27,7 @@ The script refuses grids larger than `--max-processes`/`--max-query-workers`
 ```bash
 D=<a new dated scratch folder>
 mkdir -p $D && cd $D
-git clone --branch parallelism-defaults https://github.com/andrew-saydjari/almanac.git almanac
+git clone https://github.com/andrew-saydjari/almanac.git almanac
 uv venv --python 3.12 venv
 VIRTUAL_ENV=venv uv pip install -e almanac
 # the database host/port/user come from ~/.almanac/config.yaml, the password

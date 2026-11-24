@@ -1,165 +1,232 @@
 # CLI Reference
 
-Complete command-line interface reference for `almanac`.
-
-## Main Command
+Command-line reference for `almanac` 0.5.3. `almanac --help` and
+`almanac <command> --help` print the same options.
 
 ```bash
-almanac [OPTIONS] [COMMAND]
+almanac [OPTIONS]                  # build or show exposures (and fiber mappings)
+almanac add fibers INPUT ...       # add fiber mappings to an existing file
+almanac add metadata INPUT ...     # add catalog metadata (/meta) for every sdss_id
+almanac config show|get|set ...    # view or change the configuration
+almanac dump stars|exposures|fibers|visits INPUT OUTPUT
+almanac lookup IDENTIFIER ...      # where an SDSS-V target was observed
+almanac pgdump OUTPUT_DIR          # dump the database tables almanac reads
+almanac pgrestore OUTPUT_DIR ...   # restore them into another database
+almanac postprocess INPUT PREFIX   # upstream post-reduction summary (see below)
+almanac flag ...                   # not implemented
 ```
 
-The main `almanac` command queries APOGEE observational data. When run without subcommands, it performs data queries based on the specified options.
+The main command's options go before any subcommand and are ignored when a subcommand is
+given.
 
-## Global Options
+## Main command
 
-### Date and Time Selection
+`almanac` reads the headers of the raw APOGEE files of each selected observatory and
+night, fills gaps in the exposure numbering with `image_type = "missing"` rows, applies
+the [exposure overrides](exposure-overrides.md), builds the exposure sequences and, with
+`--fibers`, reads the fiber-to-target mapping of every plate or FPS configuration observed
+and cross-matches each target to an `sdss_id`. With `--output` it writes all of this to an
+HDF5 file ([Data Formats](data-formats.md)).
+
+### Selecting nights
+
+Give at most one of the following; without any, the current MJD is used. The current MJD
+is the SDSS one: it advances at 12:00 UTC, so during an observing night it is that night's
+MJD.
 
 #### `--mjd <integer>`
-Query specific Modified Julian Date.
-- Positive values: Absolute MJD (e.g., `59300`)
-- Negative values: Relative to current MJD (e.g., `-1` for yesterday)
-- **Example**: `almanac --mjd 59300`, `almanac --mjd -7`
-
-#### `--mjd-start <integer>`
-Start of MJD range for queries.
-- **Example**: `almanac --mjd-start 59300 --mjd-end 59310`
-
-#### `--mjd-end <integer>`
-End of MJD range for queries (inclusive).
-- **Example**: `almanac --mjd-start -30 --mjd-end -1`
+One night. Negative values count back from the current MJD (`--mjd -1` is last night).
 
 #### `--mjds <list>`
-Comma-separated list of explicit MJDs to query. The list does not need to be contiguous.
-- Useful for testbeds, reprocessing selected nights, or filling gaps
-- Also accepted by `almanac add metadata`
+Comma-separated list of nights, which need not be contiguous; negative entries count back
+from the current MJD.
 - **Example**: `almanac --mjds 58011,59337,60000`
 
+#### `--mjd-start <integer>`, `--mjd-end <integer>`
+Inclusive range of nights; negative values count back from the current MJD. Without
+`--mjd-end` the range ends at the current MJD; without `--mjd-start` it starts at MJD 0.
+- **Example**: `almanac --mjd-start -30 --mjd-end -1`
+
 #### `--date <YYYY-MM-DD>`
-Query specific calendar date (UTC).
-- **Format**: ISO date format (YYYY-MM-DD)
-- **Example**: `almanac --date 2021-01-01`
+One night, by its date.
 
-#### `--date-start <YYYY-MM-DD>`
-Start of calendar date range.
-- **Example**: `almanac --date-start 2021-01-01 --date-end 2021-01-31`
+#### `--date-start <YYYY-MM-DD>`, `--date-end <YYYY-MM-DD>`
+Inclusive range of dates.
+- **Example**: `almanac --date-start 2024-01-01 --date-end 2024-01-31`
 
-#### `--date-end <YYYY-MM-DD>`
-End of calendar date range (inclusive).
-- **Example**: `almanac --date-start 2024-01-01 --date-end 2024-12-31`
+### Selecting observatories
 
-### Observatory Selection
+#### `--apo`, `--lco`
+Apache Point or Las Campanas Observatory only. With neither (or both), both observatories.
 
-#### `--apo`
-Query Apache Point Observatory data only.
-- **Example**: `almanac --apo --mjd -1`
-
-#### `--lco`
-Query Las Campanas Observatory data only.
-- **Example**: `almanac --lco --date 2024-01-01`
-
-### Data Options
+### Fiber mappings and the cross-match
 
 #### `--fibers`, `--fibres`
-Include fiber-to-target mappings in output.
-- **Example**: `almanac --mjd 60000 --fibers`
+Also read the fiber-to-target mapping (`confSummary` file in the FPS era, plugmap and
+plateHoles files in the plate era) and write one fiber table per plate or configuration
+(`raw/<obs>/<mjd>/fibers/<id>`). The table of a plate or configuration is the targets of
+the first object exposure that used it, which is also the first exposure of an object
+sequence.
 
 #### `--no-x-match`
-Skip cross-matching targets with SDSS database.
-- Only effective when combined with `--fibers`
-- Faster processing but less complete target information
-- **Example**: `almanac --fibers --no-x-match --mjd-start -7`
+Do not cross-match the targets with the SDSS database: every `sdss_id` stays -1 and no
+`apogee_id_lookup_*` night attributes are written. Only for debugging; production files
+are always cross-matched.
 
-#### APOGEE ID -> SDSS ID lookup
-Fibers identified only by an old (pre-v1) catalogid or a 2MASS-style
-designation are cross-matched through DR17 allStar `apogee_id`. By default
-almanac queries only the APOGEE IDs each night needs (in batches, memoised per
-process). If the lookup relation named by the config key
-`apogee_id_lookup_view` (default `catalogdb.mv_apogee_id_to_sdss_id`) exists,
-is readable and is not empty, it is read instead of the four-table join; its
-"Last refreshed: YYYY-MM-DD" comment, if any, is logged; a warning is logged only
-if a source table was analyzed after that date, and identifiers the view misses are retried with the live join (a match found
-that way is logged as a warning that the table is stale). When an identifier
-has several sdss_id (several catalogids, each with a rank-1 sdss_id), the
-smallest sdss_id is used, on every path.
-Each night's HDF5 group records the source used in its
-`apogee_id_lookup_*` attributes (`apogee_id_lookup_view_kind` says whether
-the relation is a table or a materialized view; the source value stays
-`materialized_view` for either). The database maintainers built
-`catalogdb.mv_apogee_id_to_sdss_id` on 2026-11-18 as an ordinary table
-(sdssdb model `catalogdb.MvApogeeIdToSdssId`, sdssdb main e7d71cb; almanac
-reads it with SQL, so no sdssdb upgrade is needed). It is listed in
-`almanac pgdump`. The table is a snapshot and must be rebuilt
-whenever `sdss_id_flat`, `sdss_id_to_catalog`,
-`catalog_to_allstar_dr17_synspec_rev1` or `allstar_dr17_synspec_rev1` is
-updated.
+#### How targets are cross-matched
+The targets of the first exposure of every object sequence (and, on nights with exposure
+overrides, the first object exposure of every fiber table) are matched:
+
+- a target whose `catalogid` is 4204682057 or more is matched by `catalogid`
+  (`catalogdb.sdss_id_flat`);
+- otherwise its designation is used: a `GAIA_DR2 <source_id>` designation through
+  `catalog_to_gaia_dr2`; any other designation, with its `2MASS-J`, `2MASS`, `2M`, `J`,
+  `APG-J` or `AP` prefix removed, first through the DR17 allStar `apogee_id`, then through
+  the 2MASS point-source catalog (`twomass_psc`).
+
+Every query keeps rank-1 rows of `sdss_id_flat`. When an identifier still reaches several
+`sdss_id` (for example two catalogids, each with a rank-1 `sdss_id`), the smallest
+`sdss_id` is used, on every path. Fibers with category `unplugged` or `offtarget` are not
+matched (`sdss_id = -1`); a hand-placed solar-system body keeps the `sdss_id` its override
+set (0).
+
+**APOGEE ID lookup source.** By default almanac queries only the APOGEE IDs each night
+needs (1,000 identifiers per query, remembered for the rest of the process). If the
+relation named by the configuration key `apogee_id_lookup_view` (default
+`catalogdb.mv_apogee_id_to_sdss_id`) exists, is readable and is not empty, it is read
+instead of the live four-table join (`sdss_id_flat`, `sdss_id_to_catalog`,
+`catalog_to_allstar_dr17_synspec_rev1`, `allstar_dr17_synspec_rev1`). Its
+`Last refreshed: YYYY-MM-DD` comment, if any, is logged, and a warning is logged if one of
+those source tables was analyzed after that date. Identifiers the table misses are looked
+up again with the live join; a match found that way is logged as a warning that the table
+is stale. The database maintainers built `catalogdb.mv_apogee_id_to_sdss_id` on 2026-11-18
+as an ordinary table (despite the `mv_` prefix); almanac reads it with SQL, so no sdssdb
+upgrade is needed. It is a snapshot and must be rebuilt whenever one of the four source
+tables is updated. It is included in `almanac pgdump`. Each night records the source it
+used in its `apogee_id_lookup_*` attributes ([Data Formats](data-formats.md#night-attributes)).
 
 #### `--full-apogee-id-lookup`
-Build the full lookup (every DR17 allStar entry) once up front instead, and
-share it with all worker processes. One heavy query (tens of minutes warm,
-hours with a cold database cache) unless the materialized view exists.
+Build the lookup for every DR17 allStar entry once, before the workers start, and give it
+to all of them, instead of querying per night. One heavy query (tens of minutes warm,
+hours with a cold database cache) when the lookup table is not available. Recorded as
+`apogee_id_lookup_mode = "full"`.
 
 #### `--live-apogee-id-join`
-Never read the materialized view; always use the live database join.
+Never read the lookup table; always use the live join.
 
-### Output Control
+### Exposure overrides
+
+#### `--no-overrides`
+Do not apply `almanac/etc/exposure_overrides.yaml` (to see what the overrides change).
+The nights record `exposure_overrides = "disabled"`. See
+[Exposure Overrides](exposure-overrides.md).
+
+### Output
 
 #### `--output <path>`, `-O <path>`
-Write output to HDF5 file at specified path.
-- **Incremental**: Appends to existing files, preserves existing data
-- **Example**: `almanac --output results.h5 --mjd-start -30`
+Write to this HDF5 file. An existing file is updated: for every night processed in this
+run, the exposures table and sequences are replaced and, with `--fibers`, the fiber tables
+of the plates and configurations observed are written (replacing tables with the same
+key; tables with other keys are left in place). Other nights are kept. The run-level
+`/missing_exposures` table is rewritten, keeping the entries of nights not processed in
+this run.
 
 #### `--skip-existing`
-Skip observatory/MJD pairs that already exist in the output file (resume mode).
-- Requires `--output`; pairs with an existing `raw/{observatory}/{mjd}/exposures` group are skipped
-- An interrupted or partially failed run can simply be re-run with the same command: only the missing pairs are processed
-- Existing `/missing_exposures` entries for skipped pairs are preserved
-- **Example**: `almanac --mjd-start 59300 --mjd-end 60300 --output big.h5 --skip-existing`
+With `--output`: skip every observatory/MJD pair that already has a
+`raw/<obs>/<mjd>/exposures` group in the file. Re-running an interrupted or partly failed
+run with the same command then processes only the missing nights.
+- **Example**: `almanac --mjd-start 59300 --mjd-end 60300 --fibers -O big.h5 --skip-existing`
 
 #### `-v`, `--verbosity`
-Control output verbosity (stackable).
-- No flag: Minimal output
-- `-v`: Show progress display
-- `-vv`: Show progress display and exposure metadata
-- **Example**: `almanac -vv --mjd -1`
+Repeatable. No flag: log messages only. `-v`: a live full-screen progress display. `-vv`:
+also print the exposure table of every night at the end.
 
-### Performance Options
+### Parallelism
 
 #### `--processes <integer>`, `-p <integer>`
-Worker processes (each processes one observatory/MJD pair).
-- **Default**: the CPU budget: `SLURM_CPUS_ON_NODE` in a Slurm job (or the CPU affinity if smaller), else `len(os.sched_getaffinity(0))`, else `os.cpu_count()`. Never more than the number of observatory/MJD pairs, so a one-night run is done in the main process. Negative values mean the default; `0` or `1` run in the main process.
-- **Example**: `almanac --processes 4 --mjd-start -30`
+Worker processes, each processing one observatory/MJD pair.
+- **Default**: the CPU budget: `SLURM_CPUS_ON_NODE` in a Slurm job (or the CPU affinity if
+  smaller), else `len(os.sched_getaffinity(0))`, else `os.cpu_count()`. Never more than
+  the number of observatory/MJD pairs, so a one-night run is done in the main process.
+  Negative values mean the default; `0` or `1` run in the main process. The resolved
+  numbers and their source are logged (`Parallelism: ...`).
 
 #### `--query-workers <integer>`
-The most worker processes that hold a database connection at once. Every night needs the database (expected exposures from opsdb; with `--fibers` and without `--no-x-match`, the `sdss_id` cross-match). When `--processes` is larger, a worker takes a slot at its first query of a night and closes its connection and frees the slot when that night is done; the other workers keep reading files meanwhile. The main process closes its own connection before the workers start.
+The most worker processes that hold a database connection at once. Every night needs the
+database (expected exposures from the operations database; with `--fibers`, the
+cross-match). When `--processes` is larger, a worker takes a slot at its first query of a
+night and closes its connection and frees the slot when that night is done; the other
+workers keep reading files meanwhile.
 - **Default**: the `catalog_query_max_workers` [configuration setting](configuration.md) (4)
 - **Example**: `almanac -p 32 --query-workers 4 --fibers --mjd-start 60800 --mjd-end 60830`
 
-### Fault Tolerance
+### Fault tolerance and exit status
 
-Long queries are fault-isolated per observatory/MJD pair:
+- Transient database connection errors are retried with exponential backoff
+  (`database_retry_attempts`, `database_retry_backoff`).
+- A night that fails is logged and skipped; the failed nights are listed at the end with
+  a reminder to re-run with `--skip-existing`. **The exit status is 0 even when nights
+  failed**: check the log, or the nights in the output file.
+- If the operations database cannot be reached for a night, the night is still written
+  and `/missing_exposures` records a `db_unavailable` row for it.
+- An invalid night selection (for example two selection options) raises an error (exit
+  status 1); a malformed override file fails before any night is processed.
 
-- **Retry with backoff**: Transient database connection errors are retried automatically (see the `database_retry_attempts` and `database_retry_backoff` [configuration settings](configuration.md))
-- **Per-night isolation**: A night that fails outright is recorded and skipped rather than aborting the whole run; failed pairs are listed at the end
-- **Resume**: Re-run the same command with `--skip-existing` to retry only the failed pairs
-- **Missing-exposure report**: Every detected missing exposure is recorded in the `/missing_exposures` table of the output file with a reason code (see [Data Formats](data-formats.md))
+## `almanac add fibers`
 
-## Adding Fiber Mappings
+```bash
+almanac add fibers INPUT (--output NEW.h5 | --in-place) [OPTIONS]
+```
 
-### `almanac add fibers <file>`
-Add fiber mappings to an almanac file built without `--fibers`. For every selected night it runs the same pipeline as `almanac --fibers` (`apogee.process_night`: exposure overrides, fiber overrides with hand-placed targets and synthetic fiber-table IDs, `sdss_id` cross-match with the maintainers' table) and writes with the same writers (`io.write_fibers`, `io.write_night_attrs`: `exposure_overrides*`, `handplaced_targets_sha256`, `apogee_id_lookup_*`). The input is the exposures table already in the file (raw headers are not re-read), first returned to header values (`plate_id`/`config_id` from `original_plate_id`/`original_config_id`; override columns cleared).
+Adds fiber mappings, cross-matched, to an almanac file built without `--fibers`. For every
+selected night it runs the same pipeline as `almanac --fibers` (`apogee.process_night`:
+exposure overrides, fiber overrides with hand-placed targets and synthetic fiber-table
+IDs, the `sdss_id` cross-match) and writes with the same writers (`io.write_fibers`,
+`io.write_night_attrs`). Its input is the exposures table already in the file (raw headers
+are not re-read), first returned to header values (`plate_id`/`config_id` from
+`original_plate_id`/`original_config_id`; override columns cleared).
 
-**Exposure columns are never rewritten.** After re-processing, the exposures and sequences are compared with the stored ones in the stored representation. A night that would differ (the override list changed since the night was built, the night was built with the other `--no-overrides` setting, a pre-override file on a night that now has overrides, or raw files appeared/disappeared so `chip_flags` changes) is refused, left untouched, and listed at the end (exit code 1): rebuild it with `almanac`. Every fiber table of an accepted night is replaced, and stale `apogee_id_lookup_*` attributes are removed with `--no-x-match`.
+**Exposure columns and sequences are never rewritten.** After re-processing, the exposures
+and sequences are compared with the stored ones, column by column in the stored
+representation. A night that would differ (the override list changed since the night was
+built, the night was built with the other `--no-overrides` setting, a file from before the
+overrides on a night that now has one, or raw files appeared or disappeared so that
+`chip_flags` changes) is refused, left untouched, and listed at the end (exit status 1):
+rebuild it with `almanac`. Every fiber table of an accepted night is replaced, and the
+night attributes are rewritten (stale `apogee_id_lookup_*` attributes are removed with
+`--no-x-match`).
 
-**Safety:** give `--output NEW.h5` (INPUT is copied and only read; NEW must not exist) or `--in-place`. Never run it on a production file in place.
+**Safety:** give exactly one of `--output NEW.h5` (INPUT is copied to NEW, which must not
+exist, and only read) or `--in-place`. Never run it in place on a file a pipeline is
+reading.
 
-**Options**: date/MJD selection and `--apo`/`--lco` (default: every night with an exposures table); `--output/-O`, `--in-place`; `--no-x-match`; `--no-overrides`; `--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes/-p` and `--query-workers` (as for `almanac`).
+**Options**: the night selection options and `--apo`/`--lco` as for `almanac` (default:
+every night in INPUT with an exposures table); `--output`/`-O`, `--in-place`;
+`--no-x-match`; `--no-overrides` (the nights must have been built without overrides);
+`--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes`/`-p` and
+`--query-workers` (as for `almanac`). There is no British-spelling alias for `add fibers`.
 
-## Metadata Commands
+**Exit status**: 1 if no night is selected, or if any night was refused or failed.
 
-### `almanac add metadata <file>`
-Build a `meta/` group (one row per unique `sdss_id`: catalog cross-match ids, Gaia DR3 astrometry and photometry, 2MASS photometry, SDSS-V targeting flags) from the `sdss_id` in an almanac HDF5 file created with `--fibers`. If none of the selected nights has fiber mappings, it exits with status 1 and writes nothing (no `/meta`, no output file, no checkpoint); nights without fiber mappings are counted in a warning and skipped.
+## `almanac add metadata`
 
-**Recommended workflow: never write the almanac file the pipeline reads.** Either decorate a copy, or write a targets-only file:
+```bash
+almanac add metadata INPUT [--output TARGETS.h5] [OPTIONS]
+```
+
+Builds a `meta` group, one row per unique positive `sdss_id` found in the fiber tables of
+the selected nights: catalog cross-match identifiers, Gaia DR3 astrometry and photometry,
+2MASS photometry, and SDSS-V targeting flags (`sdss5_target_flags`). A hand-placed
+solar-system body (`sdss_id` 0, see [Exposure Overrides](exposure-overrides.md)) gets a
+fixed row without a query: `lead = "solar_system"`, every catalog column at its default
+(-1, empty, or NaN). Other non-positive `sdss_id` are skipped.
+
+If none of the selected nights has fiber mappings, it exits with status 1 and writes
+nothing (no `/meta`, no output file, no checkpoint); nights without fiber mappings are
+counted in a warning and skipped.
+
+**Never write the almanac file a pipeline reads.** Either decorate a copy, or write a
+targets-only file:
 
 ```bash
 cp results.h5 results_meta.h5
@@ -168,205 +235,208 @@ almanac add metadata results.h5 --output targets.h5              # INPUT opened 
 almanac add metadata new.h5 --output targets_new.h5 --since targets.h5   # incremental
 ```
 
-**Resumable.** The `sdss_id` are queried in batches (`--batch-size`, default 10,000). Each finished batch is written to `<output or INPUT>.meta-checkpoint/batch_NNNNNN.h5` (temporary name, then rename) and `progress.json` is updated. If the run is killed, or a batch still fails after the per-query reconnect retries, re-running the same command continues from the finished batches; failed batches are re-run after a backoff (`--retry-backoff`, doubling, at most 30 min) up to `--max-batch-attempts` times. A checkpoint made for a different `sdss_id` set or batch size is refused (`--fresh` discards it).
+A targets file written with `--output` holds only `/meta`, `/meta_not_found` and
+`/meta_carton_pks` (and the root attribute `written_by`).
 
-**Atomic final write.** `/meta` is assembled once all batches are done. With `--output` the file is written under a temporary name and renamed; in place, the group is written as `meta__tmp` and renamed to `meta`. A reader never sees a half-written `/meta`. The ids that were queried but not found are kept in `meta_not_found/sdss_id`. Every carton the database returned is kept in `meta_carton_pks/{sdss_id, carton_pk}` (one row per pair), because `sdss5_target_flags` can only encode the cartons the installed `sdss_semaphore` knows (the others are listed in the `unknown_carton_pks` attribute).
+**Resumable.** The `sdss_id` are queried in batches (`--batch-size`, default 10,000). Each
+finished batch is written to `<output or INPUT>.meta-checkpoint/batch_NNNNNN.h5`
+(temporary name, then rename) and `progress.json` is updated. If the run is killed, or a
+batch still fails after the per-query reconnect retries, re-running the same command
+continues from the finished batches; failed batches are re-run after a backoff
+(`--retry-backoff`, doubling, at most 30 min) up to `--max-batch-attempts` times. A
+checkpoint made for a different `sdss_id` set, batch size, or `--extended` setting is
+refused (`--fresh` discards it). The checkpoint directory is removed after the final write
+unless `--keep-checkpoint`.
 
-**Provenance** (attributes on `/meta`): `almanac_version`, `almanac_commit`, `input_path`, `output_path`, `mode`, `n_sdss_id`, `n_sdss_id_input`, `n_queried`, `n_copied_from_since`, `n_not_found`, `database_host`, `database_name`, `query_start_utc`, `query_end_utc`, `columns`, `since_used`, `since_path`, `restrict_to`, `batch_size`, `query_workers`, `sdss_semaphore_version`, `unknown_carton_pks`, `sdss_id_set_sha256`.
+**Atomic final write.** `/meta` is assembled once all batches are done. With `--output` the
+file is written under a temporary name and renamed; in place, the group is written as
+`meta__tmp` and renamed to `meta`. A reader never sees a half-written `/meta`. The ids that
+were queried but not found are kept in `meta_not_found/sdss_id`. Every carton the database
+returned is kept in `meta_carton_pks/{sdss_id, carton_pk}` (one row per pair), because
+`sdss5_target_flags` can only encode the cartons the installed `sdss_semaphore` knows (the
+others are listed in the `unknown_carton_pks` attribute). The provenance attributes of
+`/meta` are listed in [Data Formats](data-formats.md#catalog-metadata-meta).
 
 **Options**:
-- Date/MJD selection: `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, `--date`, `--date-start`/`--date-end` (defaults to every MJD present in the file)
-- Observatory selection: `--apo`, `--lco`
-- `--query-workers <integer>`: parallel database query workers (default: the `catalog_query_max_workers` configuration setting). Each worker opens its own database connection, so this is also the number of connections. `0` runs the queries in-process. This command reads no raw files, so it has no `--processes`.
-- `--output, -O <file>`: write `/meta` to this new file; INPUT is opened read-only.
-- `--since <file>`: copy the `/meta` rows of a previously decorated file or targets file and query only the `sdss_id` it lacks (ids it recorded as not found are not re-queried unless `--retry-not-found`).
-- `--restrict-to <file>`: only build rows for these `sdss_id` (`.npy`, `.h5` with `/meta/sdss_id` or `/sdss_id`, or text with one id per line).
-- `--checkpoint-dir <dir>`, `--batch-size <n>`, `--fresh`, `--keep-checkpoint`, `--max-batch-attempts <n>`, `--retry-backoff <s>`
-- `--extended`: also write 79 value-added columns after the default ones (adapted from upstream sdss/almanac `a922dee`): SDSS_ID position (`ra`, `dec`, `l`, `b`, `healpix` at nside 128, RING), `n_associated`; unWISE W1/W2 fluxes, magnitudes and flags; GLIMPSE 4.5 µm; Bailer-Jones et al. (2021) distances; Gaia DR3 synthetic photometry (GSPC); Zhang, Green & Rix (2023) parameters (`zgr_*`); SDSS-IV APOGEE (DR17) targeting bitmasks (`sdss4_apogee_*`). Off by default: without it `/meta` has exactly the default columns. It runs 8 more queries per batch: measured 2026-11-19 with one query worker, the extra queries cost about 47–77 ms per `sdss_id` on a cold database cache, against about 5–9 ms per `sdss_id` for the default queries on a warm cache, and about 1.4–2.3 ms per `sdss_id` when warm. The checkpoint remembers the mode and is refused in the other one; with `--since`, rows of a file without the extended columns are queried again rather than copied. A value-added query that fails makes the batch fail and be retried (it is never skipped into default values). Upstream's 15 reddening columns (`ebv*`) are not written: nothing fills them. `/meta` gets the attributes `extended` and `extended_column_groups` in this mode only. Needs `healpy` (a declared dependency).
+- Night selection (`--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, `--date`,
+  `--date-start`/`--date-end`; default: every night in the file) and `--apo`/`--lco`.
+- `--query-workers <integer>`: parallel database query workers (default: the
+  `catalog_query_max_workers` configuration setting). Each worker opens its own database
+  connection, so this is also the number of connections. `0` runs the queries in this
+  process. This command reads no raw files, so it has no `--processes`.
+- `--output`, `-O <file>`: write `/meta` to this new file; INPUT is opened read-only.
+  Without it `/meta` is written into INPUT.
+- `--since <file>`: copy the `/meta` rows of a previously decorated file or targets file
+  and query only the `sdss_id` it lacks (ids it recorded as not found are not queried
+  again unless `--retry-not-found`).
+- `--restrict-to <file>`: only build rows for these `sdss_id` (`.npy`, `.h5` with
+  `/meta/sdss_id` or `/sdss_id`, or text with one id per line).
+- `--checkpoint-dir <dir>`, `--batch-size <n>` (10000), `--fresh`, `--keep-checkpoint`,
+  `--max-batch-attempts <n>` (8), `--retry-backoff <s>` (60).
+- `--extended`: also write 79 value-added columns after the default ones (adapted from
+  upstream sdss/almanac `a922dee`): SDSS_ID position (`ra`, `dec`, `l`, `b`, `healpix` at
+  nside 128, RING), `n_associated`; unWISE W1/W2 fluxes, magnitudes and flags; GLIMPSE
+  4.5 µm; Bailer-Jones et al. (2021) distances; Gaia DR3 synthetic photometry (GSPC);
+  Zhang, Green & Rix (2023) parameters (`zgr_*`); SDSS-IV APOGEE (DR17) targeting bitmasks
+  (`sdss4_apogee_*`). Off by default: without it `/meta` has exactly the default columns.
+  It runs 8 more queries per batch: measured 2026-11-19 with one query worker, the extra
+  queries cost about 47 to 77 ms per `sdss_id` on a cold database cache, against about 5
+  to 9 ms per `sdss_id` for the default queries on a warm cache, and about 1.4 to 2.3 ms
+  per `sdss_id` when warm. With `--since`, rows of a file without the extended columns are
+  queried again rather than copied. A value-added query that fails makes the batch fail
+  and be retried (it is never skipped into default values). Upstream's 15 reddening
+  columns (`ebv*`) are not written: nothing fills them. `/meta` gets the attributes
+  `extended` and `extended_column_groups` in this mode only. Needs `healpy` (a declared
+  dependency).
 - (`--p` was removed: it had been ignored for a long time; use `--query-workers`.)
 
-**Operational note — run this database-local.** `add metadata` throughput is strongly sensitive to database locality and cache state. Measured on a full-survey file (~4.7 million unique `sdss_id`s) with the database on the local network: ~660 ids/s (cold catalog cache; ~2h15m wall), versus 13,000–26,000 ids/s on small warmed-up slices. Over an SSH tunnel the same pass becomes impractically slow. Run `add metadata` on a host local to the SDSS database (e.g. at Utah), never through a tunnel, and budget memory for the final assembly (the finished batches are read back into RAM for the single final write).
+**Run it database-local.** Throughput is strongly sensitive to database locality and
+cache state. Measured on a full-survey file (about 4.7 million unique `sdss_id`) with the
+database on the local network: about 660 ids/s (cold catalog cache; about 2 h 15 min),
+against 13,000 to 26,000 ids/s on small warm slices. Over an SSH tunnel the same pass is
+impractically slow. Run `add metadata` on a host local to the SDSS database (e.g. at Utah),
+and budget memory for the final assembly (the finished batches are read back into memory
+for the single final write).
 
-## Configuration Commands
+## `almanac config`
 
 ### `almanac config show`
-Display all current configuration settings and config file location.
-
-```bash
-almanac config show
-```
-
-**Output includes**:
-- All configuration values  
-- Configuration file path
-- Database connection status
+Print the configuration file path (`~/.almanac/config.yaml`) and every setting.
 
 ### `almanac config get <key>`
-Retrieve specific configuration value.
-
-```bash
-almanac config get logging_level
-almanac config get sdssdb.host
-```
-
-**Nested keys**: Use dot notation for nested configuration values.
+Print one setting. Nested settings use dot notation (`almanac config get sdssdb.host`);
+a section name prints the whole section.
 
 ### `almanac config set <key> <value>`
-Set configuration value persistently.
+Set one setting and save the file. Nested settings use dot notation; a whole section
+cannot be set at once. The value is stored as text (a YAML string, e.g.
+`logging_level: '10'`); almanac converts the numeric settings when it reads them. Edit
+the file directly for list values (`display_field_names`).
 
 ```bash
 almanac config set logging_level 10
-almanac config set sdssdb.host custom-host.org
-almanac config set database_connect_time_warning 5
-```
-
-**Data types**: Values are automatically converted to appropriate types.
-
-## Usage Examples
-
-### Basic Queries
-
-```bash
-# Today's observations from both observatories
-almanac
-
-# Yesterday's observations with details
-almanac --mjd -1 -vv
-
-# Specific observatory
-almanac --apo --mjd -1
-```
-
-### Date Range Queries  
-
-```bash
-# Last week's data
-almanac --mjd-start -7 --mjd-end -1
-
-# Specific month
-almanac --date-start 2024-01-01 --date-end 2024-01-31
-
-# Single historical date
-almanac --date 2021-06-15
-```
-
-### Fiber Mapping Analysis
-
-```bash
-# Include fiber mappings
-almanac --mjd 60000 --fibers
-
-# Fast fiber query (no cross-matching)
-almanac --mjd 60000 --fibers --no-x-match
-
-# Get fibers for specific MJD
-almanac --mjd 60000 --fibers
-```
-
-### Output and Performance
-
-```bash
-# Save to file with progress
-almanac --output survey.h5 --mjd-start -30 -v
-
-# Parallel processing
-almanac --processes 8 --mjd-start -7 --output week.h5
-
-# Verbose output
-almanac -vv --mjd-start -7
-```
-
-### Configuration Management
-
-```bash
-# View all settings
-almanac config show
-
-# Set debug logging
-almanac config set logging_level 10
-
-# Configure database
-almanac config set sdssdb.host your-host.edu
+almanac config set sdssdb.host localhost
 almanac config set sdssdb.port 5432
 ```
 
-## Advanced Usage Patterns
+See [Configuration](configuration.md) for every key.
 
-### Survey Monitoring
+## `almanac dump`
 
 ```bash
-# Daily monitoring script
-almanac --mjd -1 --output daily_$(date +%Y%m%d).h5 -v
-
-# Weekly summary with fibers
-almanac --mjd-start -7 --fibers --output weekly.h5 -vv
+almanac dump stars|exposures|fibers INPUT OUTPUT [--format fits|csv|hdf5] [--overwrite]
 ```
 
-### Data Extraction
+Write a summary table of an almanac file. The format is taken from `--format`/`-f` or the
+extension of OUTPUT (`.fits`, `.csv`, `.h5`/`.hdf5`); an existing OUTPUT is refused
+without `--overwrite`.
+
+- `dump stars`: one row per `sdss_id` from the fiber tables of the object exposures with
+  an identified-star category (`science`, `veto_location_boss`, `veto_location_apogee`,
+  `standard_apogee`, `standard_boss`, `open_fiber`; see
+  `almanac.data_models.types.IDENTIFIED_STAR_CATEGORIES`): `catalogid`, `n_visits`
+  (nights; also per observatory), `n_exposures` (object exposures, flagged ones included;
+  also per observatory), and `mjd_min_*`/`mjd_max_*` per observatory (-1 if none). The
+  hand-placed solar-system body (`sdss_id` 0) is counted. Fibers that were not matched to
+  an `sdss_id` are pooled in one row with `sdss_id = -1`. `--format hdf5` is refused
+  (FITS or CSV; an `.h5` extension writes an astropy HDF5 table).
+- `dump exposures`: every row of every `raw/<obs>/<mjd>/exposures` table (all `Exposure`
+  columns).
+- `dump fibers`: every row of every fiber table (the union of the FPS and plate columns,
+  with defaults where a column is absent). The rows do not record which night or table
+  they came from. FITS output fails (the `observatory` column mixes strings and empty
+  values); use CSV or HDF5.
+- `dump visits`: not implemented (does nothing).
+
+`dump exposures` and `dump fibers` expect both `raw/apo` and `raw/lco` in INPUT, and
+`dump fibers` a fiber group in every night; otherwise they stop with a `KeyError`.
+
+## `almanac lookup`
 
 ```bash
-# Export specific time period for analysis
-almanac --date-start 2024-01-01 --date-end 2024-03-31 \\
-        --fibers --output q1_2024.h5 -v
-
-# Export recent observations
-almanac --mjd-start -30 --output exposures.h5
-
-# Non-contiguous set of nights
-almanac --mjds 58011,59337,60000 --fibers --output testbed.h5
+almanac lookup IDENTIFIER [IDENTIFIER ...] [--output FILE]
 ```
 
-### Resumable Bulk Generation
+Finds where SDSS-V targets were observed: each IDENTIFIER is an `sdss_id` or a
+`catalogid`; every catalogid of the matching `sdss_id` is looked up in `targetdb`
+(assignments with status 1) and the matching exposures are printed as a table (FPS era
+only). It first prints one `Success`/`Failed` line per `targetdb` model it probes. With
+`--output`, every night found is written to FILE with fiber mappings (cross-matched, with
+overrides), but without the per-night attributes and without `/missing_exposures`.
+
+## `almanac pgdump` and `almanac pgrestore`
 
 ```bash
+almanac pgdump OUTPUT_DIR [--host HOST] [--user USER] [--database sdss5db] [--extended]
+almanac pgrestore OUTPUT_DIR --host HOST --database DB [--user USER] [--port PORT]
+```
+
+`pgdump` runs `pg_dump -Fc` for a fixed list of tables (`almanac.cli.PGDUMP_TABLES`: the
+`catalogdb`, `targetdb` and `opsdb_apo`/`opsdb_lco` tables almanac reads, including
+`catalogdb.mv_apogee_id_to_sdss_id`) into `<schema>.<table>.dump` files. `--extended` adds
+the tables `add metadata --extended` reads (`PGDUMP_EXTENDED_TABLES`; several are large).
+Host and user default to the configuration; there is no port option (`pg_dump` uses its
+default or `PGPORT`). Failed tables are skipped and counted.
+
+`pgrestore` creates the schemas if needed and runs `pg_restore` for each file of the base
+list (`PGDUMP_TABLES`); the `--extended` tables are not restored. Missing and failed
+files are skipped and counted.
+
+## `almanac postprocess`
+
+```bash
+almanac postprocess INPUT OUTPUT_PREFIX [--processes N] [--limit N]
+```
+
+Upstream's post-reduction summary: from an almanac file decorated with `add metadata`
+and the arMADGICS outputs found relative to it (`<dir of INPUT>/../arMADGICS/...`), it
+writes `<OUTPUT_PREFIX>exposures.h5` and `<OUTPUT_PREFIX>stars.h5` with barycentric
+corrections, moon and airmass metadata, and shadow heights. The fork's pipelines do not
+use it. After writing both files it stops with a `NameError` (`unknown_carton_pks`).
+`--processes` defaults to the CPU budget, as for `almanac`.
+
+## `almanac flag`
+
+Not implemented: it parses the exposures given on the command line or on standard input
+(`<obs> <mjd> <exposure> [chip]`), prints them, and flags nothing. Exposures are flagged
+through `src/almanac/etc/bad_exposures.csv` and the `not_science` exposure overrides
+(see `flagged_bad` in [Data Formats](data-formats.md)).
+
+## Examples
+
+```bash
+# Last night at both observatories, with the exposure tables
+almanac --mjd -1 -vv
+
+# A month of exposures and fiber mappings, written to a file
+almanac --date-start 2024-01-01 --date-end 2024-01-31 --fibers -O 2024_01.h5
+
 # Large multi-year run; safe to interrupt and re-run
-almanac --mjd-start 59300 --mjd-end 60300 --fibers \
-        --output survey.h5 --skip-existing -v
+almanac --mjd-start 59300 --mjd-end 60300 --fibers -O survey.h5 --skip-existing -v
 
-# Then decorate with catalog metadata
-almanac add metadata survey.h5 --query-workers 4
+# Then catalog metadata, into a separate targets file
+almanac add metadata survey.h5 --output survey_targets.h5 --query-workers 4
 
-# Review what was missing before downstream processing
-# (see the /missing_exposures table in survey.h5)
+# Fiber mappings for a file built without --fibers
+almanac add fibers exposures.h5 --output exposures_fibers.h5
+
+# What do the overrides change on one night?
+almanac --mjd 55755 --apo --fibers -O with.h5
+almanac --mjd 55755 --apo --fibers --no-overrides -O without.h5
 ```
 
-### Troubleshooting
+## Environment variables
+
+- `SLURM_CPUS_ON_NODE`: the default number of `--processes` inside a Slurm job.
+- `PGPASSFILE`, `PGPORT` and the other libpq variables: read by the PostgreSQL client
+  (the database password normally comes from `~/.pgpass`).
+- `HOME`: the configuration file is `$HOME/.almanac/config.yaml`.
+
+## Shell completion
+
+`almanac` is a [click](https://click.palletsprojects.com/) application, so click's
+completion works, e.g. for bash:
 
 ```bash
-# Debug mode with full verbosity
-almanac config set logging_level 10
-almanac -vv --mjd -1
-
-# Test database connectivity
-almanac config show
-almanac --mjd -1 --no-x-match
+eval "$(_ALMANAC_COMPLETE=bash_source almanac)"
 ```
-
-## Exit Codes
-
-- **0**: Success
-- **1**: General error (invalid arguments, file errors)  
-- **2**: Database connection error
-- **3**: Data processing error
-
-## Environment Variables
-
-No special environment variables are required. Configuration is managed through the config file and command-line options.
-
-## Shell Completion
-
-For bash completion support, consider adding alias:
-
-```bash
-# Add to ~/.bashrc or ~/.bash_profile  
-alias almanac='almanac'
-complete -W '--mjd --mjds --mjd-start --mjd-end --date --date-start --date-end --apo --lco --fibers --fibres --no-x-match --full-apogee-id-lookup --live-apogee-id-join --output --skip-existing --processes --query-workers --verbosity --help' almanac
-```
-
-## Tips
-
-1. **Performance**: Use `--no-x-match` for faster queries when SDSS identifiers aren't needed
-2. **Storage**: HDF5 files support incremental updates - reuse the same output file
-3. **Debugging**: Use `-vv` and set `logging_level` to `10` for maximum detail
-4. **Large queries**: Break large date ranges into smaller chunks for better performance
-5. **Column selection**: Use custom column lists to reduce output size and processing time
