@@ -380,19 +380,18 @@ without `--overwrite`.
   `almanac.data_models.types.IDENTIFIED_STAR_CATEGORIES`): `catalogid`, `n_visits`
   (nights; also per observatory), `n_exposures` (object exposures, flagged ones included;
   also per observatory), and `mjd_min_*`/`mjd_max_*` per observatory (-1 if none). The
-  hand-placed solar-system body (`sdss_id` 0) is counted. Fibers that were not matched to
-  an `sdss_id` are pooled in one row with `sdss_id = -1`. `--format hdf5` is refused
-  (FITS or CSV; an `.h5` extension writes an astropy HDF5 table).
+  hand-placed solar-system body (`sdss_id` 0) is counted. Fibers without an `sdss_id`
+  (`sdss_id < 0`: not matched, or not assigned one) are not counted; their number is
+  logged. HDF5 output has one dataset per column.
 - `dump exposures`: every row of every `raw/<obs>/<mjd>/exposures` table (all `Exposure`
   columns).
-- `dump fibers`: every row of every fiber table (the union of the FPS and plate columns,
-  with defaults where a column is absent). The rows do not record which night or table
-  they came from. FITS output fails (the `observatory` column mixes strings and empty
-  values); use CSV or HDF5.
+- `dump fibers`: every row of every fiber table: `mjd` and `fiber_map_key` (the night and
+  the table, `raw/<observatory>/<mjd>/fibers/<fiber_map_key>`), then the union of the FPS
+  and plate columns, with defaults where a table lacks a column; `observatory` is the
+  night's for every row.
 - `dump visits`: not implemented (does nothing).
 
-`dump exposures` and `dump fibers` expect both `raw/apo` and `raw/lco` in INPUT, and
-`dump fibers` a fiber group in every night; otherwise they stop with a `KeyError`.
+A file may hold one observatory only, and nights without fiber tables are skipped.
 
 ## `almanac lookup`
 

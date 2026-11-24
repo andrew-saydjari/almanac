@@ -6,6 +6,10 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* ``dump``: ``exposures``/``fibers`` (and ``postprocess``) work on files with one observatory;
+  ``dump fibers`` rows carry ``mjd`` and ``fiber_map_key`` and a filled ``observatory`` (FITS
+  output works); ``dump stars`` writes HDF5 and no longer pools fibers without an
+  ``sdss_id`` into a fake star ``sdss_id = -1`` (``sdss_id`` 0, solar system, still counted).
 * ``postprocess`` no longer stops with a ``NameError`` (``unknown_carton_pks``, left from the
   old metadata code; unknown cartons are recorded by ``add metadata`` on ``/meta``).
 * ``config set`` converts the value to the key's declared type (int, float, bool, str, list)

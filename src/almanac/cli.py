@@ -1510,22 +1510,20 @@ def postprocess(input_path, output_prefix, processes, limit, **kwargs):
             almanac_exposures = {}
             almanac_fibers = {}
             with h5.File(input_path, "r") as fp:
-                n = len(fp["raw/apo"].keys()) + len(fp["raw/lco"].keys())
+                n = sum(len(fp[f"raw/{o}"]) for o in ("apo", "lco") if f"raw/{o}" in fp)
                 display.tasks[tid_almanac].total = n
-                for obs in ("apo", "lco"):
-                    for mjd in fp[f"raw/{obs}"].keys():
+                for obs, mjd, g in _iter_nights(fp):
 
-                        key = (obs, int(mjd))
+                    key = (obs, int(mjd))
 
-                        g = fp[f"raw/{obs}/{mjd}"]
-                        almanac_exposures[key] = {
-                            k: v[:] for k, v in g["exposures"].items()
-                        }
-                        almanac_fibers[key] = {
-                            int(cfg): {k: v[:] for k, v in g[f"fibers/{cfg}"].items()}
-                            for cfg in g.get("fibers", {}).keys()
-                        }
-                        display.advance(tid_almanac)
+                    almanac_exposures[key] = {
+                        k: v[:] for k, v in g["exposures"].items()
+                    }
+                    almanac_fibers[key] = {
+                        int(cfg): {k: v[:] for k, v in g[f"fibers/{cfg}"].items()}
+                        for cfg in g.get("fibers", {}).keys()
+                    }
+                    display.advance(tid_almanac)
 
             total = len(data_dict["sdss_id"])
 
@@ -2211,6 +2209,44 @@ def check_paths_and_format(input_path, output_path, given_format, overwrite):
     return given_format
 
 
+def _iter_nights(fp, observatories=("apo", "lco")):
+    """(observatory, mjd, group) for every `raw/<obs>/<mjd>` in an almanac file
+    (a file may hold one observatory only), in observatory and MJD order."""
+    for observatory in observatories:
+        if f"raw/{observatory}" not in fp:
+            continue
+        for mjd in sorted(fp[f"raw/{observatory}"], key=int):
+            yield observatory, int(mjd), fp[f"raw/{observatory}/{mjd}"]
+
+
+def _concatenate_column(parts):
+    """Concatenate one column's per-table arrays; as strings if the types disagree."""
+    import numpy as np
+
+    try:
+        return np.concatenate(parts)
+    except (TypeError, ValueError):
+        return np.concatenate([
+            np.char.encode(p.astype(str)) if p.dtype.kind != "S" else p for p in parts
+        ])
+
+
+def _write_columns(output_path, output_format, data, overwrite):
+    """Write {name: array} as a FITS/CSV table or as one HDF5 dataset per column."""
+    import numpy as np
+
+    if output_format == "hdf5":
+        import h5py as h5
+
+        with h5.File(output_path, "w", track_order=True) as fp:
+            for name, values in data.items():
+                fp.create_dataset(name, data=np.asarray(values))
+    else:
+        from astropy.table import Table
+
+        Table(data=data).write(output_path, format=output_format, overwrite=overwrite)
+
+
 @dump.command()
 @click.argument("input_path", type=str)
 @click.argument("output_path", type=str)
@@ -2223,7 +2259,15 @@ def check_paths_and_format(input_path, output_path, given_format, overwrite):
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
 def stars(input_path, output_path, overwrite, format, **kwargs):
-    """Create a star-level summary file (one row per sdss_id; FITS or CSV)"""
+    """Create a star-level summary file (one row per sdss_id; FITS, CSV or HDF5)
+
+    \b
+    Counts the science (identified-star) fibers of the first configuration or
+    plate table of each object sequence. Fibers without an sdss_id
+    (sdss_id < 0: not matched, or not assigned one) are not counted (their
+    number is logged); sdss_id 0 (a solar-system body placed by an override)
+    is.
+    """
 
     import h5py as h5
     import numpy as np
@@ -2243,66 +2287,66 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
         n_exposures_lco=0,
     )
 
+    from almanac import logger
+
     output_format = check_paths_and_format(input_path, output_path, format, overwrite)
-    assert format != "hdf5", "HDF5 output not yet supported for star summaries."
+    n_without_sdss_id = 0
     with h5.File(input_path, "r") as fp:
-        for observatory in fp["raw"]:
-            for mjd in fp[f"raw/{observatory}"]:
-                group = fp[f"raw/{observatory}/{mjd}"]
+        for observatory, mjd, group in _iter_nights(fp):
 
-                is_object = group["exposures/image_type"][:].astype(str) == "object"
-                fps = is_object * (group["exposures/config_id"][:] > 0)
-                plate = is_object * (group["exposures/plate_id"][:] > 0)
+            is_object = group["exposures/image_type"][:].astype(str) == "object"
+            fps = is_object * (group["exposures/config_id"][:] > 0)
+            plate = is_object * (group["exposures/plate_id"][:] > 0)
 
-                if not any(fps) and not any(plate) or "fibers" not in group:
-                    continue
+            if not any(fps) and not any(plate) or "fibers" not in group:
+                continue
 
-                # fps era
-                n_exposures_on_this_mjd = {}
+            # fps era
+            n_exposures_on_this_mjd = {}
 
-                if any(fps):
-                    config_ids = Counter(group["exposures/config_id"][:][fps])
-                elif any(plate):
-                    config_ids = Counter(group["exposures/plate_id"][:][plate])
-                else:
-                    continue
+            if any(fps):
+                config_ids = Counter(group["exposures/config_id"][:][fps])
+            elif any(plate):
+                config_ids = Counter(group["exposures/plate_id"][:][plate])
+            else:
+                continue
 
-                for config_id, n_exposures in config_ids.items():
-                    try:
-                        config_group = group[f"fibers/{config_id}"]
-                    except KeyError:
-                        print(
-                            f"Warning couldnt get config {config_id} for {observatory} {mjd}"
-                        )
-                        continue
-
-                    ok = (
-                        (config_group["catalogid"][:] > 0)
-                        # >= 0: sdss_id 0 is a solar-system body placed on a
-                        # fiber by an exposure override (Vesta; see
-                        # almanac/etc/handplaced_targets.yaml).
-                        | (config_group["sdss_id"][:] >= 0)
-                        | (config_group["twomass_designation"][:].astype(str) != "")
-                    ) * np.isin(
-                        config_group["category"][:].astype(str),
-                        IDENTIFIED_STAR_CATEGORIES,
+            for config_id, n_exposures in config_ids.items():
+                try:
+                    config_group = group[f"fibers/{config_id}"]
+                except KeyError:
+                    print(
+                        f"Warning couldnt get config {config_id} for {observatory} {mjd}"
                     )
-                    sdss_ids = config_group["sdss_id"][:][ok]
-                    catalogids = config_group["catalogid"][:][ok]
-                    for sdss_id, catalogid in zip(sdss_ids, catalogids):
-                        stars.setdefault(sdss_id, deepcopy(default))
-                        stars[sdss_id].setdefault(
-                            "catalogid", catalogid
-                        )  # this can change over time,... should we track that/
-                        n_exposures_on_this_mjd.setdefault(sdss_id, 0)
-                        n_exposures_on_this_mjd[sdss_id] += n_exposures
+                    continue
 
-                for sdss_id, n_exposures in n_exposures_on_this_mjd.items():
-                    stars[sdss_id]["n_exposures"] += n_exposures
-                    stars[sdss_id][f"n_exposures_{observatory}"] += n_exposures
-                    stars[sdss_id]["n_visits"] += 1
-                    stars[sdss_id][f"n_visits_{observatory}"] += 1
-                    stars[sdss_id][f"mjds_{observatory}"].add(int(mjd))
+                identified = np.isin(
+                    config_group["category"][:].astype(str),
+                    IDENTIFIED_STAR_CATEGORIES,
+                )
+                # sdss_id >= 0 only: -1 means no sdss_id (pooling those
+                # fibers would make a fake star -1); sdss_id 0 is a
+                # solar-system body placed on a fiber by an exposure
+                # override (Vesta; see almanac/etc/handplaced_targets.yaml).
+                has_sdss_id = config_group["sdss_id"][:] >= 0
+                n_without_sdss_id += int(np.sum(identified & ~has_sdss_id))
+                ok = identified & has_sdss_id
+                sdss_ids = config_group["sdss_id"][:][ok]
+                catalogids = config_group["catalogid"][:][ok]
+                for sdss_id, catalogid in zip(sdss_ids, catalogids):
+                    stars.setdefault(sdss_id, deepcopy(default))
+                    stars[sdss_id].setdefault(
+                        "catalogid", catalogid
+                    )  # this can change over time,... should we track that/
+                    n_exposures_on_this_mjd.setdefault(sdss_id, 0)
+                    n_exposures_on_this_mjd[sdss_id] += n_exposures
+
+            for sdss_id, n_exposures in n_exposures_on_this_mjd.items():
+                stars[sdss_id]["n_exposures"] += n_exposures
+                stars[sdss_id][f"n_exposures_{observatory}"] += n_exposures
+                stars[sdss_id]["n_visits"] += 1
+                stars[sdss_id][f"n_visits_{observatory}"] += 1
+                stars[sdss_id][f"mjds_{observatory}"].add(int(mjd))
 
         rows = []
         for sdss_id, meta in stars.items():
@@ -2316,10 +2360,15 @@ def stars(input_path, output_path, overwrite, format, **kwargs):
             stars[sdss_id].pop("mjds_lco")
             rows.append(dict(sdss_id=sdss_id, **meta))
 
+    if n_without_sdss_id:
+        logger.warning(
+            f"{n_without_sdss_id} science fibers without an sdss_id (sdss_id < 0) were not counted"
+        )
+
     from astropy.table import Table
 
     t = Table(rows=rows)
-    t.write(output_path, format=output_format, overwrite=overwrite)
+    _write_columns(output_path, output_format, {name: t[name] for name in t.colnames}, overwrite)
 
 
 @dump.command()
@@ -2367,11 +2416,12 @@ def exposures(input_path, output_path, format, overwrite, **kwargs):
         data[field_name] = []
 
     with h5.File(input_path, "r") as fp:
-        for observatory in ("apo", "lco"):
-            for mjd in fp[f"raw/{observatory}"].keys():
-                group = fp[f"raw/{observatory}/{mjd}/exposures"]
-                for key in group.keys():
-                    data[key].extend(group[key][:])
+        for observatory, mjd, night in _iter_nights(fp):
+            if "exposures" not in night:
+                continue
+            group = night["exposures"]
+            for key in group.keys():
+                data[key].extend(group[key][:])
 
     if output_format == "hdf5":
         from almanac.io import _write_models_to_hdf5_group
@@ -2399,9 +2449,16 @@ def exposures(input_path, output_path, format, overwrite, **kwargs):
 )
 @click.option("--overwrite", is_flag=True, help="Overwrite existing output file")
 def fibers(input_path, output_path, format, overwrite, **kwargs):
-    """Create a fiber-level summary file"""
+    """Create a fiber-level summary file (one row per fiber of every fiber table)
 
-    import os
+    \b
+    Columns: `mjd` and `fiber_map_key` (the night and the fiber table, i.e.
+    `raw/<observatory>/<mjd>/fibers/<fiber_map_key>`, the configuration or
+    plate ID or a synthetic override table ID), then the FPSTarget and
+    PlateTarget columns (`observatory` is the night's; columns a table does
+    not have get their defaults).
+    """
+
     import h5py as h5
     import numpy as np
 
@@ -2409,6 +2466,7 @@ def fibers(input_path, output_path, format, overwrite, **kwargs):
 
     from almanac.data_models.fps import FPSTarget
     from almanac.data_models.plate import PlateTarget
+    from almanac.io import get_default_array
 
     fields = {
         **FPSTarget.model_fields,
@@ -2417,39 +2475,35 @@ def fibers(input_path, output_path, format, overwrite, **kwargs):
         **PlateTarget.model_computed_fields,
     }
 
-    defaults = {
-        name: spec.default for name, spec in fields.items() if hasattr(spec, "default")
-    }
-    defaults["twomass_designation"] = ""
-
-    data = dict()
-    for field_name, field_spec in fields.items():
-        data[field_name] = []
-
+    parts = {"mjd": [], "fiber_map_key": [], **{name: [] for name in fields}}
     with h5.File(input_path, "r") as fp:
-        for observatory in ("apo", "lco"):
-            for mjd in fp[f"raw/{observatory}"].keys():
-                group = fp[f"raw/{observatory}/{mjd}/fibers"]
-                for config_id in group.keys():
-                    group = fp[f"raw/{observatory}/{mjd}/fibers/{config_id}"]
-                    n = len(group["sdss_id"][:])
+        for observatory, mjd, night in _iter_nights(fp):
+            if "fibers" not in night:
+                continue
+            for key in night["fibers"]:
+                table = night[f"fibers/{key}"]
+                n = len(table["sdss_id"])
+                parts["mjd"].append(np.full(n, mjd, dtype=np.int64))
+                parts["fiber_map_key"].append(np.full(n, str(key).encode()))
+                for name, spec in fields.items():
+                    if name == "observatory":
+                        values = np.full(n, observatory.encode(), dtype="S3")
+                    elif name in table:
+                        values = table[name][:]
+                    else:
+                        values = get_default_array(spec, n)
+                    parts[name].append(values)
 
-                    for field_name in data:
-                        if field_name in group.keys():
-                            data[field_name].extend(group[field_name][:])
-                        else:
-                            data[field_name].extend([defaults[field_name]] * n)
-
-    if output_format == "hdf5":
-        from almanac.io import _write_models_to_hdf5_group
-
-        with h5.File(output_path, "w", track_order=True) as fp:
-            _write_models_to_hdf5_group(fields, data, fp)
-    else:
-        from astropy.table import Table
-
-        t = Table(data=data)
-        t.write(output_path, format=output_format, overwrite=overwrite)
+    data = {
+        name: (
+            _concatenate_column(columns) if columns
+            else (np.zeros(0, dtype=np.int64) if name in ("mjd",)
+                  else np.zeros(0, dtype="S1") if name == "fiber_map_key"
+                  else get_default_array(fields[name], 0))
+        )
+        for name, columns in parts.items()
+    }
+    _write_columns(output_path, output_format, data, overwrite)
 
 
 if __name__ == "__main__":
