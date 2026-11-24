@@ -1129,7 +1129,10 @@ def get_sequences(
     :param fields:
         Tuple of column names to group exposures by.
     :param ignore_interrupting_darks: [optional]
-        Whether to allow (and ignore) dark exposures interrupting sequences.
+        Whether to allow (and ignore) dark exposures interrupting sequences:
+        a dark between two exposures of `image_type` (with the same `fields`)
+        does not split their sequence. A sequence never starts or ends with a
+        dark, and darks alone are not a sequence.
 
     :returns:
         List of tuples containing (start_exposure, end_exposure) for each sequence.
@@ -1143,7 +1146,16 @@ def get_sequences(
 
     sequence_exposure_numbers = []
     for v, group in groupby(s, key=lambda x: tuple(getattr(x, f) for f in fields)):
+        group = list(group)
+        # Exposure numbers of the `image_type` exposures (not the darks).
+        wanted = [e.exposure for e in group if e.image_type == image_type]
         for si, ei in utils.group_contiguous([e.exposure for e in group]):
+            if ignore_interrupting_darks:
+                # Trim leading/trailing darks; drop runs of darks alone.
+                inside = [n for n in wanted if si <= n <= ei]
+                if not inside:
+                    continue
+                si, ei = min(inside), max(inside)
             sequence_exposure_numbers.append((si, ei))
     return sequence_exposure_numbers
 

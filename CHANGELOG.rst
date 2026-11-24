@@ -6,6 +6,10 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* Arc-lamp sequences (``sequences/arclamps``) no longer start or end with darks, and darks
+  alone are no longer a sequence; darks between two arc lamps (same dither) still do not
+  break a run. Changes ``sequences/arclamps`` in built files (nothing in
+  ApogeeReduction.jl reads sequences).
 * ``lookup`` no longer prints debug ``Success``/``Failed`` lines, and ``lookup -O`` writes
   nights as ``almanac --fibers`` does, night attributes included (``io.write_night_attrs``).
 * ``dump``: ``exposures``/``fibers`` (and ``postprocess``) work on files with one observatory;

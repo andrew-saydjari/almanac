@@ -127,7 +127,7 @@ exposure order:
 | Dataset | Definition |
 |---------|------------|
 | `objects` | Runs of consecutive `object` exposures with the same `field_id`, `plate_id` and `config_id` (after the exposure overrides, so an exposure with its own synthetic fiber-table ID is a run of its own) |
-| `arclamps` | Runs of `arclamp` exposures with the same `dithered_pixels`, where `dark` exposures do not interrupt a run. Darks are selected together with the arc lamps, so leading or trailing darks are inside a range, and a run of darks alone (same dither) is also an entry |
+| `arclamps` | Runs of `arclamp` exposures with the same `dithered_pixels`, where `dark` exposures (same dither) between two arc lamps do not interrupt a run. A range starts and ends with an arc lamp; darks alone are not an entry |
 | `missing` | Runs of exposure numbers with `image_type = "missing"` |
 
 The object sequences are the visits of a night. They decide which exposures' fiber
