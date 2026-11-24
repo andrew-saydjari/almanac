@@ -6,6 +6,10 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* ``retarget_fibers`` works on FPS fibers: the row rewrite sets the FPS identifier fields
+  (``twomass_designation``, ``catalogid``, ``ra``, ``dec``) instead of the plate-only
+  ``target_ids``/``twomass_id`` (which raised a ValidationError), and the row is
+  cross-matched as usual. No shipped entry is FPS, so no output changes.
 * Stopping a build no longer corrupts the output file. The main command and ``add fibers``
   open the output only while writing it (one session per night, flushed and closed; HDF5
   metadata-cache evictions disabled within a session), so a run killed with SIGKILL leaves

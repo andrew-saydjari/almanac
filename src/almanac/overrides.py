@@ -669,21 +669,32 @@ def header_pointing(exposure):
 
 def _retarget_row(t, entry: Override, target: HandplacedTarget, solar_system_sdss_id: int,
                   pointing=(float("nan"), float("nan"))) -> None:
-    """Replace a fiber row's targeting information with a hand-placed target's."""
+    """
+    Replace a fiber row's targeting information with a hand-placed target's.
+
+    The identifier fields the cross-match reads (`apogee.parse_target_identifier`:
+    `catalogid`, then `twomass_designation`) are set on both models: on a
+    plate row `twomass_designation` is computed from `twomass_id` (or
+    `target_ids`, cleared), on an FPS row it is a field itself.
+    """
     t.original_category = t.category
     t.category = HANDPLACED_CATEGORY
     t.override_id = entry.id
     t.override_target = target.name
-    t.target_ids = ""
+    is_plate = "target_ids" in type(t).model_fields
+    designation = target.twomass_designation if target.kind == "star" else ""
+    if is_plate:
+        t.target_ids = ""
+        t.twomass_id = designation
+    else:
+        t.twomass_designation = designation
     if target.kind == "star":
         t.override_kind = STAR_KIND
-        t.twomass_id = target.twomass_designation
         t.catalogid = target.catalogid
         t.ra, t.dec = target.ra, target.dec
         t.sdss_id = -1  # assigned by the ordinary cross-match
     else:
         t.override_kind = SOLAR_SYSTEM_KIND
-        t.twomass_id = ""
         t.catalogid = -1
         t.ra, t.dec = pointing
         t.sdss_id = solar_system_sdss_id
