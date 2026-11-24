@@ -6,6 +6,15 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* Main command: end-of-run summary and exit status. Every run logs the number of nights
+  requested, skipped by ``--skip-existing``, with data, without data, failed and built
+  without the operations database, and lists the failed nights with a category
+  (``exception``, ``database_error``, ``write_failed``, ``pool_broken``); with ``--output``
+  the same is written to the new ``/run_summary`` group (accumulated over runs). The exit
+  status is now 3 when any night failed, and 4 when the operations database could not be
+  queried for a night while the cross-match was requested; nights without data and
+  ``--skip-existing`` skips stay 0. A cross-match without a database connection raises
+  ``apogee.DatabaseUnavailableError`` instead of a ``KeyError``.
 * ``almanac add fibers`` adds fiber mappings to an almanac file built without ``--fibers``,
   by running the same night pipeline as ``almanac --fibers`` (``apogee.process_night``:
   exposure overrides, fiber overrides including hand-placed targets and synthetic table

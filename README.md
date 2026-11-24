@@ -165,8 +165,10 @@ almanac --mjd-start 59300 --mjd-end 60300 -O big.h5 --fibers --skip-existing
 ```
 
 Transient database errors are retried with backoff, and a night that fails is logged and
-skipped rather than ending the run (the failed nights are listed at the end; the exit
-status is still 0). See `almanac config show` for the retry settings.
+skipped rather than ending the run. The run ends with a summary (also written to
+`/run_summary` in the file) and exits with status 3 if any night failed (4 if the database
+was unavailable while cross-matching); nights without data and nights skipped by
+`--skip-existing` are not failures. See `almanac config show` for the retry settings.
 
 ### Parallelism
 

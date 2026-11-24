@@ -86,7 +86,7 @@ almanac --mjd-start 59300 --mjd-end 60300 --fibers \
 With `--skip-existing`, nights already in the output file are skipped, so if the run is
 interrupted or some nights fail, re-run the same command. Transient database errors are
 retried with backoff, and a night that fails is logged and skipped (the failed nights are
-listed at the end; the exit status is still 0). See the
+listed at the end and in `/run_summary`; the exit status is then 3). See the
 [Configuration Guide](configuration.md) for the retry settings.
 
 ### Missing-exposure reporting

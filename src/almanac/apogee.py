@@ -14,6 +14,14 @@ from almanac.data_models.types import ImageType, assigns_sdss_id
 from almanac.data_models.utils import mjd_to_exposure_prefix, get_exposure_path
 
 
+class DatabaseUnavailableError(RuntimeError):
+    """
+    The cross-match needs the SDSS database and it is not connected (raised
+    for the night instead of an obscure KeyError; the main command counts
+    the night as failed, category ``database_error``).
+    """
+
+
 # Full APOGEE ID -> SDSS ID lookup (every DR17 allStar apogee_id), installed
 # only when explicitly requested (`almanac --full-apogee-id-lookup`, via
 # `set_apogee_id_lookup`). When it is None, lookups are targeted: only the
@@ -1190,6 +1198,16 @@ def parse_target_identifier(target):
             return ("coordinate", designation)
 
 
+def _table(lookup, key):
+    """`lookup[key]`; a missing table means the database was not connected."""
+    try:
+        return lookup[key]
+    except KeyError:
+        raise DatabaseUnavailableError(
+            f"cannot cross-match targets ({key} lookup): the SDSS database is not connected"
+        ) from None
+
+
 def cross_match_targets(
     exposures: List[Exposure],
     science_sequences,
@@ -1296,11 +1314,11 @@ def cross_match_targets(
                 key, identifier = parse_target_identifier(target)
                 if key == "coordinate":
                     for lookup_key in ("apogee_id", "twomass_psc"):
-                        target.sdss_id = lookup[lookup_key].get(identifier, -1)
+                        target.sdss_id = _table(lookup, lookup_key).get(identifier, -1)
                         if target.sdss_id != -1:
                             break
                 else:
-                    target.sdss_id = lookup[key].get(identifier, -1)
+                    target.sdss_id = _table(lookup, key).get(identifier, -1)
 
 
 def get_almanac_data(

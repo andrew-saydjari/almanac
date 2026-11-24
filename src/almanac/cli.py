@@ -48,6 +48,80 @@ def _pool_initializer(apogee_id_lookup=None, apogee_id_source=None, db_gate=None
         apogee.set_apogee_id_source(apogee_id_source)
 
 
+# Exit statuses of the main command (see docs/cli-reference.md, "Fault
+# tolerance and exit status"). 0 also covers nights with no data and nights
+# skipped by --skip-existing; 1 and 2 are click's (error, bad usage).
+EXIT_NIGHTS_FAILED = 3
+EXIT_DB_UNAVAILABLE = 4
+
+# Night categories that count as failed (the night is not in the file).
+FAILED_CATEGORIES = ("exception", "database_error", "write_failed", "pool_broken")
+
+
+def _failure_category(exception) -> str:
+    """
+    Classify the exception that made a night fail: ``database_error`` for a
+    database connection error that persisted after the retries (peewee
+    OperationalError / InterfaceError) or a cross-match without a database
+    connection (`apogee.DatabaseUnavailableError`), else ``exception`` (a
+    bad plugmap or confSummary, an unreadable raw file, a bug, ...).
+    """
+    from peewee import InterfaceError, OperationalError
+    from almanac.apogee import DatabaseUnavailableError
+
+    if isinstance(exception, (OperationalError, InterfaceError, DatabaseUnavailableError)):
+        return "database_error"
+    return "exception"
+
+
+def _run_exit_status(failed, db_unavailable_keys, cross_match_requested) -> int:
+    """
+    Exit status of the main command (conservative: only unambiguous problems
+    are non-zero):
+
+    * `EXIT_NIGHTS_FAILED` (3) if any night failed (`failed`: [(observatory,
+      mjd, category, message), ...]; an exception while processing or writing
+      it, a database error that persisted after the retries, a broken
+      process pool): the night is not in the output.
+    * else `EXIT_DB_UNAVAILABLE` (4) if cross-matching was requested
+      (``--fibers`` without ``--no-x-match``) and the operations database
+      could not be queried for at least one night (`db_unavailable_keys`; its
+      missing-exposures check is incomplete, reason ``db_unavailable``).
+    * else 0, also when nights had no data or were skipped by
+      ``--skip-existing``, and for ``db_unavailable`` nights of a build that
+      did not request the cross-match.
+    """
+    if any(category in FAILED_CATEGORIES for _, _, category, _ in failed):
+        return EXIT_NIGHTS_FAILED
+    if cross_match_requested and db_unavailable_keys:
+        return EXIT_DB_UNAVAILABLE
+    return 0
+
+
+def _run_summary(counts, failed, db_unavailable_keys, exit_status):
+    """Log the end-of-run summary (always): counts per category, failed nights."""
+    from almanac import logger
+
+    problems = bool(failed or db_unavailable_keys)
+    log = logger.warning if problems or exit_status else logger.info
+    log(
+        "Run summary: "
+        + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in counts.items())
+        + f"; exit status {exit_status}"
+    )
+    if failed:
+        logger.warning(f"{len(failed)} observatory/MJD pairs failed and were skipped:")
+        for observatory, mjd, category, message in failed:
+            logger.warning(f"  - {observatory}/{mjd} [{category}]: {message}")
+    if db_unavailable_keys:
+        logger.warning(
+            f"{len(db_unavailable_keys)} observatory/MJD pairs were built without the "
+            "operations database (expected exposures not checked; missing_exposures "
+            "reason db_unavailable): "
+            + ", ".join(f"{o}/{m}" for o, m in sorted(db_unavailable_keys))
+        )
+
+
 @click.group(invoke_without_command=True)
 @click.option("-v", "--verbosity", count=True,
               help="Verbosity: -v live progress display; -vv also the exposure table of every night")
@@ -171,8 +245,11 @@ def main(
     observatories = utils.get_observatories(apo, lco)
 
     tasks = list(product(mjds, observatories))
+    n_requested = len(tasks)
+    n_skipped = 0
     results = []
-    failed = []  # [(observatory, mjd, error message), ...]
+    failed = []  # [(observatory, mjd, category, error message), ...]
+    no_data_keys = set()  # (observatory, mjd) processed, no exposure files
     missing_rows = []  # run-level missing-exposures report records
     processed_keys = set()  # (observatory, mjd) completed in this run
 
@@ -256,7 +333,7 @@ def main(
             def _on_write_error(item, exception):
                 observatory_w, mjd_w = item[:2]
                 logger.error(f"Failed to write {observatory_w}/{mjd_w}: {exception}")
-                failed.append((observatory_w, mjd_w, f"write failed: {exception}"))
+                failed.append((observatory_w, mjd_w, "write_failed", str(exception)))
 
             writer = QueueWriter(
                 _write_night,
@@ -352,7 +429,7 @@ def main(
                                 raise
                             except BrokenProcessPool:
                                 failed.append(
-                                    (observatory, mjd, "process pool broken")
+                                    (observatory, mjd, "pool_broken", "process pool broken")
                                 )
                                 raise
                             except Exception as e:
@@ -360,7 +437,9 @@ def main(
                                 logger.exception(
                                     f"Failed to process {observatory}/{mjd}: {e}"
                                 )
-                                failed.append((observatory, mjd, str(e)))
+                                failed.append(
+                                    (observatory, mjd, _failure_category(e), str(e))
+                                )
                             else:
                                 processed_keys.add((observatory, mjd))
                                 missing_rows.extend(missing)
@@ -372,6 +451,7 @@ def main(
 
                                 if not exposures:
                                     display.no_data[observatory].add(v)
+                                    no_data_keys.add((observatory, mjd))
                                 else:
                                     display.completed[observatory].add(v)
                                     results.append(result)
@@ -412,9 +492,9 @@ def main(
                         # and failure report are still written.
                         logger.error(f"Process pool broke: {e}")
                         for mjd_o, obs_o in futures.values():
-                            failed.append((obs_o, mjd_o, "process pool broken"))
+                            failed.append((obs_o, mjd_o, "pool_broken", "process pool broken"))
                         for mjd_o, obs_o in task_iter:
-                            failed.append((obs_o, mjd_o, "process pool broken"))
+                            failed.append((obs_o, mjd_o, "pool_broken", "process pool broken"))
                     except KeyboardInterrupt:
                         for pid in pool._processes:
                             os.kill(pid, signal.SIGKILL)
@@ -448,7 +528,7 @@ def main(
                         logger.exception(
                             f"Failed to process {observatory}/{mjd}: {e}"
                         )
-                        failed.append((observatory, mjd, str(e)))
+                        failed.append((observatory, mjd, _failure_category(e), str(e)))
                     else:
                         processed_keys.add((observatory, mjd))
                         missing_rows.extend(missing)
@@ -458,6 +538,7 @@ def main(
 
                         if not exposures:
                             display.no_data[observatory].add(v)
+                            no_data_keys.add((observatory, mjd))
                         else:
                             display.completed[observatory].add(v)
                             results.append(result)
@@ -483,11 +564,52 @@ def main(
             # thread touches `fp` again.
             writer.close(drain=True)
 
+        # End-of-run accounting (see `_run_exit_status`).
+        failed_keys = {(o, m) for o, m, _, _ in failed}
+        db_unavailable_keys = {
+            (r["observatory"], r["mjd"]) for r in missing_rows
+            if r["reason"] == "db_unavailable"
+        } - failed_keys
+        cross_match_requested = bool(fibers and not no_x_match)
+        exit_status = _run_exit_status(failed, db_unavailable_keys, cross_match_requested)
+        counts = dict(
+            requested=n_requested,
+            skipped_existing=n_skipped,
+            with_data=len(processed_keys - no_data_keys - failed_keys),
+            no_data=len(no_data_keys),
+            failed=len(failed_keys),
+            db_unavailable=len(db_unavailable_keys),
+        )
+
         if output:
             # Run-level missing-exposures table. Entries from previous runs
             # for (observatory, mjd) pairs not processed here (skipped or
             # failed) are preserved.
             io.write_missing_exposures(fp, missing_rows, replace_keys=processed_keys)
+            # Nights with a problem (accumulated over runs into this file)
+            # and the counts of this run, so a build can be audited later.
+            from datetime import datetime, timezone
+            from almanac import __version__
+
+            summary_rows = [
+                dict(observatory=o, mjd=m, category=c, message=msg)
+                for o, m, c, msg in failed
+            ] + [
+                dict(observatory=o, mjd=m, category="db_unavailable", message="")
+                for o, m in sorted(db_unavailable_keys)
+            ]
+            io.write_run_summary(
+                fp,
+                summary_rows,
+                attrs={
+                    **{f"last_run_n_{k}": v for k, v in counts.items()},
+                    "last_run_exit_status": exit_status,
+                    "last_run_finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "last_run_almanac_version": __version__,
+                    "last_run_cross_match": cross_match_requested,
+                },
+                replace_keys=processed_keys | failed_keys,
+            )
 
     if verbosity >= 2:
         for observatory, mjd, exposures, sequences, _missing in results:
@@ -505,17 +627,14 @@ def main(
             + (" (see /missing_exposures in the output file)" if output else "")
         )
 
-    if failed:
+    _run_summary(counts, failed, db_unavailable_keys, exit_status)
+    if failed and output:
         logger.warning(
-            f"{len(failed)} observatory/MJD pairs failed and were skipped:"
+            "Re-run the same command with --skip-existing to retry only "
+            "the failed pairs."
         )
-        for observatory, mjd, message in failed:
-            logger.warning(f"  - {observatory}/{mjd}: {message}")
-        if output:
-            logger.warning(
-                "Re-run the same command with --skip-existing to retry only "
-                "the failed pairs."
-            )
+    if exit_status:
+        ctx.exit(exit_status)
 
 
 @main.command()

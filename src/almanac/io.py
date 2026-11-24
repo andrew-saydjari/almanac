@@ -354,6 +354,81 @@ def write_missing_exposures(fp, rows, replace_keys=None):
     return group
 
 
+RUN_SUMMARY_GROUP = "run_summary"
+
+_RUN_SUMMARY_DESCRIPTIONS = {
+    "observatory": "Observatory name",
+    "mjd": "MJD of the night",
+    "category": (
+        "What went wrong: exception | database_error | write_failed | "
+        "pool_broken (the night is not in the file) or db_unavailable (the night "
+        "was written, but the operations database could not be queried for its "
+        "expected exposures)"
+    ),
+    "message": "The error message (empty for db_unavailable)",
+}
+
+
+def read_run_summary(fp) -> List[Dict[str, Any]]:
+    """
+    Read the /run_summary table (nights with a problem, see
+    `write_run_summary`) of an almanac HDF5 file. Empty if absent.
+    """
+    if RUN_SUMMARY_GROUP not in fp:
+        return []
+    group = fp[RUN_SUMMARY_GROUP]
+    rows = []
+    for observatory, mjd, category, message in zip(
+        group["observatory"][:], group["mjd"][:], group["category"][:], group["message"][:]
+    ):
+        rows.append(
+            dict(
+                observatory=observatory.decode(),
+                mjd=int(mjd),
+                category=category.decode(),
+                message=message.decode() if isinstance(message, bytes) else str(message),
+            )
+        )
+    return rows
+
+
+def write_run_summary(fp, rows, attrs, replace_keys):
+    """
+    Write the /run_summary group of an almanac HDF5 file: a table of the
+    nights that had a problem (one row per observatory/MJD; columns
+    observatory, mjd, category, message) and, as attributes, the counts of
+    the run that wrote it (``last_run_*``).
+
+    The table accumulates over runs into the same file (like
+    /missing_exposures): rows of a previous run are kept for observatory/MJD
+    pairs not in ``replace_keys`` (the pairs this run processed or tried to
+    process), so a night that failed and was not retried stays listed, and a
+    night that was retried successfully is removed.
+    """
+    preserved = [
+        r for r in read_run_summary(fp)
+        if (r["observatory"], r["mjd"]) not in replace_keys
+    ]
+    rows = sorted(preserved + list(rows), key=lambda r: (r["observatory"], r["mjd"]))
+
+    delete_hdf5_entry(fp, RUN_SUMMARY_GROUP)
+    group = fp.create_group(RUN_SUMMARY_GROUP, track_order=True)
+    datasets = dict(
+        observatory=np.array([r["observatory"] for r in rows], dtype="S3"),
+        mjd=np.array([r["mjd"] for r in rows], dtype=np.int64),
+        category=np.array([r["category"] for r in rows], dtype="S16"),
+        message=np.array(
+            [str(r["message"]).encode("utf-8") for r in rows],
+            dtype=h5.string_dtype("utf-8"),
+        ),
+    )
+    for name, data in datasets.items():
+        dataset = group.create_dataset(name, data=data)
+        dataset.attrs["description"] = _RUN_SUMMARY_DESCRIPTIONS[name]
+    group.attrs.update(attrs)
+    return group
+
+
 def get_or_create_group(fp, group_name):
     try:
         group = fp[group_name]

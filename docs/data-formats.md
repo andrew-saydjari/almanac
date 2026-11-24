@@ -505,6 +505,35 @@ Entries are refreshed per observatory/MJD pair on each run; pairs not processed 
 on disk also appear in `raw/{observatory}/{mjd}/exposures` with `image_type="missing"` so
 that exposure numbering stays dense.
 
+## Run summary
+
+Every run of `almanac --output` writes the `/run_summary` group: a table of the nights that
+had a problem, accumulated over runs into the same file (rows of an earlier run are kept for
+nights this run did not process, e.g. skipped with `--skip-existing`; a night retried
+successfully is removed), with the counts of the last run as attributes.
+
+<!-- audit:table run_summary -->
+| Dataset | Type | Description |
+|---------|------|-------------|
+| `observatory` | string | Observatory ("apo" or "lco") |
+| `mjd` | integer | MJD of the night |
+| `category` | string | `exception`, `database_error`, `write_failed`, `pool_broken` (the night is not in the file) or `db_unavailable` (written without the operations database) |
+| `message` | string | The error message (empty for `db_unavailable`) |
+
+<!-- audit:table run_summary_attrs -->
+| Attribute | Description |
+|-----------|-------------|
+| `last_run_n_requested` | Observatory/MJD pairs requested |
+| `last_run_n_skipped_existing` | Skipped by `--skip-existing` |
+| `last_run_n_with_data` | Processed, with exposures (written) |
+| `last_run_n_no_data` | Processed, no exposure files on disk (nothing written) |
+| `last_run_n_failed` | Failed (not written) |
+| `last_run_n_db_unavailable` | Written without the operations database |
+| `last_run_exit_status` | Exit status of the run (see [exit status](cli-reference.md#fault-tolerance-and-exit-status)) |
+| `last_run_finished_utc` | When the run finished (UTC, ISO 8601) |
+| `last_run_almanac_version` | almanac version |
+| `last_run_cross_match` | Whether the cross-match was requested (`--fibers` without `--no-x-match`) |
+
 ## Catalog metadata (`/meta`)
 
 `almanac add metadata` writes `/meta`: one row per `sdss_id`, sorted, with the columns of

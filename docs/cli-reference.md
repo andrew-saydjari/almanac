@@ -164,13 +164,32 @@ workers keep reading files meanwhile.
 
 - Transient database connection errors are retried with exponential backoff
   (`database_retry_attempts`, `database_retry_backoff`).
-- A night that fails is logged and skipped; the failed nights are listed at the end with
-  a reminder to re-run with `--skip-existing`. **The exit status is 0 even when nights
-  failed**: check the log, or the nights in the output file.
-- If the operations database cannot be reached for a night, the night is still written
-  and `/missing_exposures` records a `db_unavailable` row for it.
+- A night that fails is logged and skipped; the run goes on. Every run ends with a
+  summary (always logged): the number of nights requested, skipped by `--skip-existing`,
+  with data, without data, failed, and built without the operations database, then the
+  failed nights with their category and error, and a reminder to re-run with
+  `--skip-existing`. With `--output` the same is written to the
+  [`/run_summary`](data-formats.md#run-summary) group of the file.
+- If the operations database cannot be reached for a night's expected exposures, the
+  night is still written and `/missing_exposures` records a `db_unavailable` row for it.
 - An invalid night selection (for example two selection options) raises an error (exit
-  status 1); a malformed override file fails before any night is processed.
+  status 1 or 2); a malformed override file fails before any night is processed.
+
+What can happen to a requested night, and the exit status:
+
+| Night | In the file | Logged | Category in `/run_summary` | Exit status |
+|-------|-------------|--------|----------------------------|-------------|
+| Built normally (holes and missing raw files are recorded in `/missing_exposures`) | yes | summary count | (none) | 0 |
+| No exposure files on disk | no (only `/missing_exposures` rows, e.g. `db_no_file`) | summary count | (none) | 0 |
+| Skipped by `--skip-existing` (already in the file) | unchanged | summary count | earlier rows kept | 0 |
+| Exception while processing (e.g. a plugmap without a `PLUGMAPOBJ` table, a missing confSummary, an unreadable raw file) | no | error + traceback, listed at the end | `exception` | **3** |
+| Database error that persisted after the retries, or cross-match without a database connection | no | as above | `database_error` | **3** |
+| Writing the night failed | no | as above | `write_failed` | **3** |
+| Worker process pool broke (e.g. a worker was killed) | no | as above | `pool_broken` | **3** |
+| Operations database not reachable for the expected exposures, cross-match requested (`--fibers` without `--no-x-match`) | yes (missing-exposures check incomplete) | warning, listed at the end | `db_unavailable` | **4** (if no night failed) |
+| Same, without the cross-match | yes | as above | `db_unavailable` | 0 |
+
+Exit status 3 takes precedence over 4. Without `--output` the same statuses apply.
 
 ## `almanac add fibers`
 

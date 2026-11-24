@@ -101,8 +101,8 @@ class TestFaultIsolation:
         monkeypatch.setattr(apogee, "get_almanac_data", boom)
 
         result = run_cli(["--mjd", str(MJD), "--apo", "--output", output])
-        # The run completes (exit 0), records the failure, and still writes
-        # the missing-exposures table.
-        assert result.exit_code == 0
+        # The run completes, records the failure, still writes the
+        # missing-exposures table, and exits with status 3 (failed nights).
+        assert result.exit_code == 3
         with h5.File(output, "r") as fp:
             assert "missing_exposures" in fp

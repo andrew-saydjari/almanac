@@ -103,8 +103,9 @@ almanac --mjd-start 59300 --mjd-end 60300 --output big.h5 --fibers --skip-existi
 ```
 
 Nights already in the output file are skipped, so only missing (or previously failed)
-nights are processed. Failed nights are listed at the end of a run, which still exits with
-status 0.
+nights are processed. Failed nights are listed at the end of a run and in `/run_summary`,
+and the run exits with status 3 (see
+[exit status](cli-reference.md#fault-tolerance-and-exit-status)).
 
 ## Data Interpretation
 
