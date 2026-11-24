@@ -37,9 +37,15 @@ past upstream's.
   bodies: targeted APOGEE ID lookups through the maintainers' table, best rank then smallest
   ``sdss_id``, no ``sdss_id`` for unplugged or off-target fibers, and exposure-override keys.
   Outputs are unchanged.
-* Lock refresh to upstream's dependabot versions: requests 2.33.0, pygments 2.20.0,
-  pytest 9.0.3 (with pytest-asyncio 1.4.0), urllib3 2.7.0, idna 3.15, cryptography 50.0.0,
-  pillow 12.3.0, soupsieve 2.8.4.
+* Every dependency in ``pyproject.toml`` (runtime, ``dev``, ``docs``) now has a semver range:
+  lower bound = the version tested (older deliberate minimums kept), upper bound = below the
+  next major (next minor for 0.x; ``furo`` uses calendar versions and is uncapped).
+  ``uv.lock`` is fully upgraded inside those ranges (``uv lock --upgrade``), which includes
+  upstream's dependabot packages. Major moves of direct dependencies: astropy 8, peewee 4,
+  sdssdb 1.x, rich 15, pytest 9, Sphinx 9 (the undocumented ``Sphinx<8`` cap is lifted; the
+  docs build with ``-W``), myst-parser 5, isort 9, invoke 3, twine 7. ``sdss-semaphore`` is
+  capped below 0.2.9: 0.2.9 encodes more cartons, which changes ``/meta/sdss5_target_flags``
+  (measured). ``docs/requirements.txt`` follows the ``docs`` extra.
 * Not taken from upstream: ``almanac add fibers`` as written upstream (and the readers
   ``io.read_exposures`` / ``io.read_sequences`` that only it uses), the unpopulated ``ebv*`` ``Source`` fields, and
   default-on value-added queries (the fork has them as ``add metadata --extended``).
