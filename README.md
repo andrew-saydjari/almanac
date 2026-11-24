@@ -144,6 +144,20 @@ Transient database errors are retried with backoff, and a night that fails outri
 recorded and skipped rather than killing the run (a list of failed nights is printed at
 the end). See ``almanac config show`` for the retry and worker-count knobs.
 
+## Adding fiber mappings to an existing file
+
+If a file was built without `--fibers`, `almanac add fibers` adds the fiber mappings later.
+It runs the same code as `almanac --fibers` (exposure overrides, hand-placed targets,
+cross-match) on the exposures already in the file, so raw headers are not re-read:
+
+```bash
+almanac add fibers file.h5 --output file_fibers.h5     # INPUT only read
+almanac add fibers file.h5 --in-place --mjd 60285 --apo
+```
+
+A night whose stored exposures would change under the current override list is refused
+(rebuild it with `almanac`). See `docs/cli-reference.md`.
+
 ## Adding catalog metadata
 
 Once you have an output file with fiber mappings, `almanac add metadata` builds a `meta/`

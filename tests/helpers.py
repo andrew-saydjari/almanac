@@ -28,6 +28,7 @@ def make_exposures(observatory="apo", mjd=MJD):
             image_type="object",
             config_id=123,
             field_id=456,
+            prefix=None,  # filled in from the observatory (the upstream #66 fix)
             name="first",
             observer_comment="a comment",
             seeing=1.5,
@@ -39,6 +40,7 @@ def make_exposures(observatory="apo", mjd=MJD):
             image_type="object",
             config_id=123,
             field_id=456,
+            prefix=None,
         ),
         Exposure(
             observatory=observatory,
@@ -46,6 +48,7 @@ def make_exposures(observatory="apo", mjd=MJD):
             exposure=3,
             image_type="arclamp",
             lamp_thar=1,
+            prefix=None,
         ),
     ]
 

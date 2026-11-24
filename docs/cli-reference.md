@@ -143,6 +143,17 @@ Long queries are fault-isolated per observatory/MJD pair:
 - **Resume**: Re-run the same command with `--skip-existing` to retry only the failed pairs
 - **Missing-exposure report**: Every detected missing exposure is recorded in the `/missing_exposures` table of the output file with a reason code (see [Data Formats](data-formats.md))
 
+## Adding Fiber Mappings
+
+### `almanac add fibers <file>`
+Add fiber mappings to an almanac file built without `--fibers`. For every selected night it runs the same pipeline as `almanac --fibers` (`apogee.process_night`: exposure overrides, fiber overrides with hand-placed targets and synthetic fiber-table IDs, `sdss_id` cross-match with the maintainers' table) and writes with the same writers (`io.write_fibers`, `io.write_night_attrs`: `exposure_overrides*`, `handplaced_targets_sha256`, `apogee_id_lookup_*`). The input is the exposures table already in the file (raw headers are not re-read), first returned to header values (`plate_id`/`config_id` from `original_plate_id`/`original_config_id`; override columns cleared).
+
+**Exposure columns are never rewritten.** After re-processing, the exposures and sequences are compared with the stored ones in the stored representation. A night that would differ (the override list changed since the night was built, the night was built with the other `--no-overrides` setting, a pre-override file on a night that now has overrides, or raw files appeared/disappeared so `chip_flags` changes) is refused, left untouched, and listed at the end (exit code 1): rebuild it with `almanac`. Every fiber table of an accepted night is replaced, and stale `apogee_id_lookup_*` attributes are removed with `--no-x-match`.
+
+**Safety:** give `--output NEW.h5` (INPUT is copied and only read; NEW must not exist) or `--in-place`. Never run it on a production file in place.
+
+**Options**: date/MJD selection and `--apo`/`--lco` (default: every night with an exposures table); `--output/-O`, `--in-place`; `--no-x-match`; `--no-overrides`; `--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes/-p` and `--query-workers` (as for `almanac`).
+
 ## Metadata Commands
 
 ### `almanac add metadata <file>`

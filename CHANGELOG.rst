@@ -4,6 +4,23 @@
 Change Log
 ==========
 
+Unreleased (fork)
+-----------------
+* ``almanac add fibers`` adds fiber mappings to an almanac file built without ``--fibers``,
+  by running the same night pipeline as ``almanac --fibers`` (``apogee.process_night``:
+  exposure overrides, fiber overrides including hand-placed targets and synthetic table
+  ids, the ``sdss_id`` cross-match) on the exposures stored in the file, returned to their
+  header values first (``overrides.rewind_exposure_overrides``). It writes fiber tables and
+  night attributes with the same writers (``io.write_fibers``, ``io.write_night_attrs``).
+  It never rewrites exposure columns or sequences: a night whose stored exposures or
+  sequences differ from the re-processed ones (override list changed since the build, or
+  the other ``--no-overrides`` setting) is refused and left untouched. It needs
+  ``--output NEW.h5`` (copy, INPUT only read) or ``--in-place``. Honors ``--processes``,
+  ``--query-workers``, ``--no-x-match``, ``--no-overrides``, ``--full-apogee-id-lookup``,
+  ``--live-apogee-id-join``. No ``add fibres`` alias. Adapted from upstream sdss/almanac #66.
+* ``io.read_exposures`` (also restores ``original_plate_id``/``original_config_id``),
+  ``io.compare_exposures``, ``io.compare_sequences``, ``apogee.prepare_cross_match``.
+
 0.5.3
 -----
 Sync with upstream sdss/almanac 0.5.2 (``a922dee``), merged into the fork; the version is one
@@ -34,8 +51,8 @@ past upstream's.
   entries). The first 71 bytes are unchanged (on the test nights 255 of 1,588 rows set bits
   in the new bytes). ``/meta`` tables built before and after are not column-compatible
   without zero-padding ``sdss5_target_flags``.
-* Not taken from upstream: ``almanac add fibers`` (and the readers ``io.read_exposures`` /
-  ``io.read_sequences`` that only it uses), the unpopulated ``ebv*`` ``Source`` fields, and
+* Not taken from upstream: ``almanac add fibers`` as written upstream (and the readers
+  ``io.read_exposures`` / ``io.read_sequences`` that only it uses), the unpopulated ``ebv*`` ``Source`` fields, and
   default-on value-added queries (the fork has them as ``add metadata --extended``).
 
 0.4.3 (fork, unreleased changes)

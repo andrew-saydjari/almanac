@@ -121,6 +121,12 @@ Parse hexdump output to extract header key-value pairs.
 #### `cross_match_targets(exposures, science_sequences, xmatch=True, only_assign_sdss_id_to_first_exposure_per_configuration=True)`
 Load the fiber-to-target mapping for the first exposure of each science sequence and, if `xmatch`, assign each target an `sdss_id` in place. Uses the targeted lookups (APOGEE IDs per night through the maintainers' table unless a full lookup is installed; catalogid, Gaia DR2 and 2MASS helpers), keeps the best-ranked row and breaks ties to the smallest `sdss_id`. Unplugged and off-target fibers keep `sdss_id = -1`. `get_almanac_data(..., fibers=True)` calls it after applying the fiber overrides (with `include_first_exposure_per_fiber_map_key=True` on override nights, so the per-exposure tables are cross-matched too). Solar-system bodies placed by an override keep the `sdss_id` set there.
 
+#### `process_night(observatory, mjd, exposures, missing=(), fibers=False, meta=False, only_assign_sdss_id_to_first_exposure_per_configuration=True, overrides=True)`
+The one per-night pipeline after the exposures are read: exposure overrides, sequences, and with `fibers` the fiber overrides and `cross_match_targets`. `get_almanac_data` calls it with exposures from the raw headers; `almanac add fibers` with exposures read back from a file and rewound by `almanac.overrides.rewind_exposure_overrides`.
+
+#### `prepare_cross_match(xmatch, live_apogee_id_join=False, full_apogee_id_lookup=False)`
+Once-per-run cross-match setup shared by `almanac --fibers` and `almanac add fibers`: resolves the APOGEE ID lookup source, returns `(source, lookup_attrs, full_lookup)`.
+
 ## almanac.io
 
 HDF5 input/output operations for structured data storage.
@@ -142,6 +148,15 @@ Delete HDF5 group/entry if it exists.
 **Parameters:**
 - `fp`: HDF5 file pointer  
 - `group_name`: Name of entry to delete
+
+#### `read_exposures(fp, observatory, mjd)`
+Reconstruct the `Exposure` models for one night from `raw/{observatory}/{mjd}/exposures` (restoring `original_plate_id`/`original_config_id`), without the raw headers. Empty list if the group is missing.
+
+#### `compare_exposures(group, exposures)` / `compare_sequences(fp, observatory, mjd, sequences)`
+Differences between a stored exposures group (or sequences) and what writing the given models (sequences) would store; empty if identical. Used by `almanac add fibers` to refuse nights.
+
+#### `write_night_attrs(fp, observatory, mjd, override_attrs=None, lookup_attrs=None, clear_stale_lookup_attrs=False)`
+The per-night attributes written by both `almanac` and `almanac add fibers`.
 
 #### `write_fibers(fp, observatory, mjd, exposures, verbose=False)`
 Write the fiber-to-target mappings for one night to `raw/{observatory}/{mjd}/fibers/{key}`, one group per configuration (or plate); the key is `Exposure.fiber_map_key` (the configuration or plate ID; an exposure override that edits fibers gives its exposure a synthetic ID, so its own table). Only exposures whose `targets` have been populated (see `almanac.apogee.cross_match_targets`) are written; existing groups for the same configuration are replaced.

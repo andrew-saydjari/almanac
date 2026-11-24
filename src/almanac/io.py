@@ -130,6 +130,131 @@ def write_fibers(fp, observatory, mjd, exposures, verbose: bool = False):
 
 
 
+
+def write_night_attrs(fp, observatory, mjd, override_attrs=None, lookup_attrs=None,
+                      clear_stale_lookup_attrs: bool = False):
+    """
+    Record on `raw/{observatory}/{mjd}` how the night was built: whether the
+    exposure overrides were applied (`almanac.overrides.overrides_attrs`) and,
+    when targets were cross-matched, which APOGEE ID -> SDSS ID source was
+    used (`almanac.apogee.apogee_id_source_attrs`). With
+    `clear_stale_lookup_attrs` and no `lookup_attrs`, `apogee_id_lookup_*`
+    attributes left from an earlier cross-match are removed (`almanac add
+    fibers`, which replaces every fiber table of the night). Used by both
+    `almanac` and `almanac add fibers`.
+    """
+    group = fp[f"raw/{observatory}/{mjd}"]
+    group.attrs.update(override_attrs or {})
+    if lookup_attrs:
+        group.attrs.update(lookup_attrs)
+    elif clear_stale_lookup_attrs:
+        for name in [n for n in group.attrs if n.startswith("apogee_id_lookup_")]:
+            del group.attrs[name]
+
+
+def read_exposures(fp, observatory, mjd) -> List[Exposure]:
+    """
+    Reconstruct the `Exposure` models for one observatory and MJD from an
+    existing almanac file, in exposure-number order, without touching the raw
+    exposure headers (adapted from upstream sdss/almanac #66).
+
+    The stored `original_plate_id` / `original_config_id` columns (the header
+    values when an exposure override replaced `plate_id` / `config_id`) are
+    restored too, so `almanac.overrides.rewind_exposure_overrides` can return
+    the exposures to their header values. Returns an empty list if the group
+    does not exist or is empty.
+    """
+    path = f"raw/{observatory}/{mjd}/exposures"
+    if path not in fp:
+        return []
+    group = fp[path]
+
+    columns = {
+        name: group[name][:]
+        for name in Exposure.model_fields
+        if name in group
+    }
+    if not columns:
+        return []
+    originals = {
+        name: group[name][:]
+        for name in ("original_plate_id", "original_config_id")
+        if name in group
+    }
+    num_records = len(next(iter(columns.values())))
+
+    exposures = []
+    for i in range(num_records):
+        kwds = {}
+        for name, values in columns.items():
+            value = values[i]
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
+                if value in ("", "None"):
+                    # Unset optional string (stored as an empty or "None"
+                    # byte string): let the model default apply.
+                    continue
+            elif isinstance(value, np.generic):
+                value = value.item()
+            kwds[name] = value
+        kwds.setdefault("prefix", dict(apo="apR", lco="asR").get(kwds["observatory"]))
+        exposure = Exposure(**kwds)
+        for name, values in originals.items():
+            original = int(values[i])
+            current = exposure.plate_id if name == "original_plate_id" else exposure.config_id
+            if original != current:
+                setattr(exposure, f"_{name}", original)
+        exposures.append(exposure)
+    return exposures
+
+
+def compare_sequences(fp, observatory, mjd, sequences) -> List[str]:
+    """
+    Differences between the stored `raw/<obs>/<mjd>/sequences` and recomputed
+    `sequences` ({image type: [(start, end), ...]}). Empty if identical.
+    """
+    path = f"raw/{observatory}/{mjd}/sequences"
+    stored = {}
+    if path in fp:
+        stored = {k: [tuple(int(x) for x in row) for row in fp[path][k][:]] for k in fp[path]}
+    new = {k: [tuple(int(x) for x in row) for row in v] for k, v in sequences.items() if len(v) or k in stored}
+    differences = []
+    for k in sorted(set(stored) | set(new)):
+        if stored.get(k, []) != new.get(k, []):
+            differences.append(f"sequences/{k} differ")
+    return differences
+
+
+def compare_exposures(group, exposures) -> List[str]:
+    """
+    Differences between a stored `raw/<obs>/<mjd>/exposures` group and what
+    writing `exposures` would store there (same writer, compared column by
+    column in the stored representation). Empty if they are identical.
+    """
+    import io as _io
+
+    buffer = _io.BytesIO()
+    with h5.File(buffer, "w") as tmp:
+        write_models_to_hdf5_group(exposures, tmp.create_group("exposures", track_order=True))
+        new = tmp["exposures"]
+        differences = []
+        for name in sorted(set(group) ^ set(new)):
+            differences.append(f"column {name} only in the {'file' if name in group else 'recomputed exposures'}")
+        for name in sorted(set(group) & set(new)):
+            a, b = group[name][()], new[name][()]
+            if a.shape != b.shape or a.dtype != b.dtype:
+                differences.append(f"column {name}: {a.shape}/{a.dtype} vs {b.shape}/{b.dtype}")
+            elif a.dtype.kind == "f":
+                if not np.array_equal(a, b, equal_nan=True):
+                    differences.append(f"column {name} differs")
+            elif not np.array_equal(a, b):
+                rows = np.flatnonzero(a != b) if a.ndim == 1 else []
+                differences.append(
+                    f"column {name} differs"
+                    + (f" (exposures {[int(r) + 1 for r in rows[:5]]})" if len(rows) else "")
+                )
+    return differences
+
 MISSING_EXPOSURES_GROUP = "missing_exposures"
 
 _MISSING_EXPOSURES_DESCRIPTIONS = {
