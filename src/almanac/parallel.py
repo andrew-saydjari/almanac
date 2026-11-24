@@ -5,12 +5,13 @@ There are two knobs, with the same meaning in every command that has them:
 
 ``--processes`` / ``-p``
     Worker processes for file reading and computation (the main ``almanac``
-    command and ``almanac postprocess``). Default: the CPU budget of this job
+    command, ``almanac add fibers`` and ``almanac postprocess``). Default: the CPU budget of this job
     (see `cpu_budget`).
 
 ``--query-workers``
     The most database connections almanac's worker processes hold at once
-    (the main ``almanac`` command and ``almanac add metadata``). Default: the
+    (the main ``almanac`` command, ``almanac add fibers`` and
+    ``almanac add metadata``). Default: the
     ``catalog_query_max_workers`` configuration setting, kept small so that
     the shared SDSS database (often reached through a single SSH tunnel) is
     not hit hard.

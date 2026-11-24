@@ -1,402 +1,160 @@
 # Development Guide
 
-This guide covers development setup, contributing guidelines, and testing for the `almanac` project.
+Development setup, tests, and documentation for this fork of `almanac`.
 
 ## Development Setup
 
 ### Prerequisites
 
-- **Python**: 3.8 or higher
-- **Git**: For version control
-- **uv**: Recommended for dependency management
-- **Access**: SDSS database access for full functionality
+- **Python**: 3.11 or newer
+- **uv**: environments are built from `uv.lock`
+- **Access**: the SDSS database and the raw data, for anything beyond the unit tests
 
 ### Installation for Development
 
-1. **Clone the repository**:
 ```bash
-git clone https://github.com/sdss/almanac.git
+git clone https://github.com/andrew-saydjari/almanac.git
 cd almanac
-```
-
-2. **Install development dependencies**:
-```bash
-# Using uv (recommended)
-uv pip install -e ".[dev]"
-
-# Or using pip
-pip install -e ".[dev]"
-```
-
-3. **Verify installation**:
-```bash
-almanac --help
-almanac config show
+uv sync --frozen --extra dev                 # add --extra docs for the Sphinx build
+uv run almanac --help
 ```
 
 ## Project Structure
 
 ```
 almanac/
-├── src/almanac/         # Main package source
-│   ├── __init__.py     # Version information
-│   ├── cli.py          # Command-line interface
-│   ├── config.py       # Configuration management
-│   ├── database.py     # Database connectivity
-│   ├── apogee.py       # APOGEE data processing
-│   ├── io.py           # HDF5 I/O operations
-│   ├── display.py      # Output formatting
-│   ├── logger.py       # Logging configuration
-│   └── utils.py        # Utility functions
-├── docs/               # Documentation
-├── tests/              # Test suite (if present)
-├── bin/                # Utility scripts
-├── pyproject.toml      # Project configuration
-├── CHANGELOG.rst       # Change log
-├── LICENSE.md          # License
-└── README.md           # Main documentation
-```
-
-## Development Workflow
-
-### Code Style
-
-The project follows these style conventions:
-
-#### Python Code Style
-- **Line length**: 99 characters (configured in `pyproject.toml`)
-- **Import sorting**: Uses `isort` with custom sections for SDSS packages
-- **Linting**: Uses `flake8` with custom rules
-
-#### Import Organization
-```python
-# Standard library imports
-import os
-import sys
-
-# Third-party imports
-import numpy as np
-import click
-
-# SDSS-specific imports
-import sdssdb
-from sdsstools import get_logger
-
-# Local imports
-from almanac.config import config
-from almanac.logger import logger
-```
-
-### Code Quality Tools
-
-#### Linting
-```bash
-# Run flake8
-flake8 src/almanac/
-
-# Run with specific config
-flake8 --config pyproject.toml src/
-```
-
-#### Import Sorting
-```bash
-# Check import order
-isort --check-only src/almanac/
-
-# Fix import order
-isort src/almanac/
-```
-
-#### Code Coverage
-```bash
-# Run tests with coverage
-pytest --cov almanac --cov-report html
-
-# View coverage report
-open htmlcov/index.html
+├── src/almanac/
+│   ├── __init__.py          # __version__, config and logger
+│   ├── cli.py               # every command (click); bin/almanac links here
+│   ├── config.py            # Config dataclass, ~/.almanac/config.yaml
+│   ├── database.py          # sdssdb connection profile (connects on import)
+│   ├── retry.py             # retry with backoff on transient database errors
+│   ├── parallel.py          # --processes / --query-workers resolution, database slots
+│   ├── apogee.py            # per-night pipeline: exposures, missing exposures,
+│   │                        #   sequences, cross-match (process_night)
+│   ├── overrides.py         # exposure overrides and hand-placed targets
+│   ├── io.py                # HDF5 writers and readers
+│   ├── writer.py            # writer thread for the main command
+│   ├── metadata.py          # `add metadata` (checkpoints, /meta)
+│   ├── catalog.py           # catalog queries behind /meta
+│   ├── qa.py                # bad_exposures.csv lookup
+│   ├── display.py           # rich progress display and tables
+│   ├── logger.py, utils.py
+│   ├── data_models/         # Pydantic models: Exposure, FPSTarget, PlateTarget,
+│   │                        #   Source/ExtendedSource, types
+│   ├── postprocess/         # helpers of `almanac postprocess`
+│   └── etc/                 # exposure_overrides.yaml, handplaced_targets.yaml,
+│                            #   bad_exposures.csv
+├── scripts/                 # generators of the override file blocks
+│   ├── handplaced_targets/
+│   └── robots_not_moved/
+├── benchmarks/parallelism/  # --processes x --query-workers benchmark
+├── tests/                   # pytest unit tests (no database by default)
+├── docs/                    # this documentation (Sphinx + MyST)
+├── pyproject.toml, uv.lock
+└── CHANGELOG.rst
 ```
 
 ## Testing
 
-### Test Framework
-
-The project uses `pytest` for testing with additional plugins:
-
-- **pytest-cov**: Coverage reporting
-- **pytest-mock**: Mocking support  
-- **pytest-asyncio**: Async testing
-- **pytest-sugar**: Enhanced output
-
-### Running Tests
-
 ```bash
-# Run all tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run with coverage
-pytest --cov almanac --cov-report html
-
-# Run specific test file
-pytest tests/test_config.py
-
-# Run specific test
-pytest tests/test_config.py::test_load_config
+uv run pytest -q --no-cov                    # what CI runs
+uv run pytest tests/test_overrides.py -q --no-cov
+uv run pytest                                # with coverage (pyproject addopts: --cov almanac --cov-report html)
 ```
 
-### Test Configuration
-
-Tests are configured in `pyproject.toml`:
-
-```toml
-[tool.pytest.ini_options]
-addopts = "--cov almanac --cov-report html -W ignore"
-```
-
-### Writing Tests
-
-#### Test Structure
-```python
-import pytest
-from almanac.config import Config, load_config_file
-
-def test_default_config():
-    """Test default configuration values."""
-    config = Config()
-    assert config.logging_level == 20
-    assert config.sdssdb.port == 5432
-
-@pytest.fixture
-def temp_config_file(tmp_path):
-    """Create temporary config file for testing."""
-    config_file = tmp_path / "test_config.yaml"
-    config_file.write_text("""
-logging_level: 10
-sdssdb:
-  host: test-host.org
-""")
-    return config_file
-
-def test_load_config_file(temp_config_file):
-    """Test loading configuration from file."""
-    config_data = load_config_file(str(temp_config_file))
-    assert config_data['logging_level'] == 10
-    assert config_data['sdssdb']['host'] == 'test-host.org'
-```
-
-#### Mocking Database Connections
-```python
-@pytest.fixture
-def mock_database(mocker):
-    """Mock database connection for testing."""
-    mock_db = mocker.patch('almanac.database.database')
-    mock_db.set_profile.return_value = True
-    return mock_db
-
-def test_database_functionality(mock_database):
-    """Test database-dependent functionality."""
-    from almanac.database import is_database_available
-    assert is_database_available is True
-```
-
-## Contributing
-
-### Contribution Process
-
-1. **Fork** the repository on GitHub
-2. **Clone** your fork locally
-3. **Create** a feature branch: `git checkout -b feature/new-feature`
-4. **Make** your changes following the code style guidelines
-5. **Add** tests for new functionality
-6. **Run** the test suite: `pytest`
-7. **Commit** your changes: `git commit -m "Add new feature"`
-8. **Push** to your fork: `git push origin feature/new-feature`
-9. **Submit** a pull request
-
-### Pull Request Guidelines
-
-#### Before Submitting
-- [ ] All tests pass: `pytest`
-- [ ] Code follows style guidelines: `flake8 src/` and `isort --check-only src/`
-- [ ] Documentation updated for new features
-- [ ] Changelog updated (`CHANGELOG.rst`)
-- [ ] Version number updated if appropriate
-
-#### Pull Request Description
-Include in your PR description:
-- **Summary**: Brief description of changes
-- **Motivation**: Why this change is needed
-- **Testing**: How the change was tested
-- **Breaking Changes**: Any backwards compatibility issues
-
-### Code Review Process
-
-1. **Automated checks**: GitHub Actions run tests and style checks
-2. **Maintainer review**: Code review by project maintainers
-3. **Feedback incorporation**: Address review comments
-4. **Approval and merge**: After approval, changes are merged
-
-## Building and Distribution
-
-### Local Development Build
-
-```bash
-# Build the package
-python -m build
-
-# Install locally
-pip install -e .
-```
-
-### Version Management
-
-Version is managed in `src/almanac/__init__.py`:
-
-```python
-__version__ = "0.1.11"
-```
-
-Update version for releases following [semantic versioning](https://semver.org/).
-
-### Release Process
-
-1. **Update version** in `__init__.py`
-2. **Update CHANGELOG.rst** with release notes
-3. **Commit changes**: `git commit -m "Release version X.Y.Z"`
-4. **Tag release**: `git tag vX.Y.Z`
-5. **Push changes**: `git push origin main --tags`
-
-## Documentation
-
-### Building Documentation
-
-Documentation is in Markdown format. For Sphinx documentation (if configured):
-
-```bash
-# Install docs dependencies
-pip install -e ".[docs]"
-
-# Build HTML documentation
-sphinx-build -b html docs/ docs/_build/html/
-
-# View documentation
-open docs/_build/html/index.html
-```
-
-### Documentation Standards
-
-- **API documentation**: Docstrings for all public functions and classes
-- **User guides**: Step-by-step instructions with examples
-- **Code examples**: Working examples that can be copy-pasted
-- **Changelog**: Document all user-facing changes
-
-## Debugging
-
-### Development Debugging
-
-```bash
-# Enable debug logging
-almanac config set logging_level 10
-
-# Run with verbose output
-almanac -vv --mjd -1
-
-# Use debugger
-python -m pdb -m almanac --mjd -1
-```
-
-### Common Development Issues
-
-#### Database Connection
-```bash
-# Test database connectivity
-almanac config show
-python -c "from almanac.database import is_database_available; print(is_database_available)"
-```
-
-#### Import Issues
-```bash
-# Check package installation
-python -c "import almanac; print(almanac.__version__)"
-
-# Check module imports
-python -c "from almanac import config, database, apogee"
-```
-
-#### Performance Profiling
-```bash
-# Profile execution
-python -m cProfile -o profile.stats -m almanac --mjd -1
-python -c "import pstats; pstats.Stats('profile.stats').sort_stats('cumulative').print_stats(10)"
-```
+The unit tests use no database and no raw data. Tests against the live database are
+skipped unless `ALMANAC_DB_TESTS=1` and a connection is available.
+`tests/test_declared_dependencies.py` checks that every module imported under
+`src/almanac` is a declared dependency.
 
 ## Continuous Integration
 
-### GitHub Actions
+`.github/workflows/`:
 
-The project uses GitHub Actions for:
-- **Testing**: Run test suite on multiple Python versions
-- **Code quality**: Check code style and import order  
-- **Coverage**: Generate and report test coverage
+- `tests.yml`: on pushes to `main` and every pull request, `uv sync --locked --extra dev`
+  (so `uv.lock` must match `pyproject.toml`), the dependency check, then the unit tests,
+  on Python 3.11 and 3.12.
+- `secret-scan.yml`: fails if a tracked file contains a hard-coded public-web URL (see
+  `CONTRIBUTING.md`; run `python3 .github/scripts/check_no_public_web_tokens.py` locally).
+- `docs.yml`: on pull requests to (and pushes of) `main`/`master` that touch `docs/`,
+  `src/` or the build configuration: the Sphinx build with warnings as errors
+  (`sphinx-build -b html . _build/html -W --keep-going`), a link check (not enforced),
+  and the `doc-quality` job. `doc-quality` runs markdownlint and rstcheck (reported, not
+  enforced) and fails only if `docs/index.rst`, `docs/installation.md`,
+  `docs/user-guide.md` or `docs/api-reference.md` is missing.
+- `publish.yml`, `release.yml`: package build and tagged releases (inherited from
+  upstream).
 
-### Configuration
+## Documentation
 
-CI configuration in `.github/workflows/`:
-- `test.yml`: Run tests on push and pull requests
-- `lint.yml`: Check code style and formatting
-- `coverage.yml`: Generate coverage reports
-
-## Security
-
-### Sensitive Information
-
-- **Never commit**: Database passwords, API keys, or credentials
-- **Use environment variables**: For sensitive configuration
-- **Review dependencies**: Regularly update and audit dependencies
-
-### Security Testing
+### Building
 
 ```bash
-# Check for known vulnerabilities
-safety check
-
-# Audit dependencies
-pip-audit
+uv sync --frozen --extra dev --extra docs
+cd docs
+uv run sphinx-build -b html . _build/html -W --keep-going
 ```
 
-## Performance Considerations
+`docs/Makefile` has the usual Sphinx targets (`make html`). The API pages under
+`docs/api/` are generated by autodoc; `sdssdb`, `pydl`, `colorlog`, `rich`, `pydantic`
+and `pydantic_core` are mocked (`docs/conf.py`).
 
-### Optimization Guidelines
+### Documentation audit
 
-- **Database queries**: Minimize database roundtrips
-- **Parallel processing**: Use multiprocessing for I/O-bound operations
-- **Memory usage**: Process data in chunks for large datasets
-- **Caching**: Cache expensive computations when appropriate
-
-### Profiling
+`docs/audit_docs.py` generates the ground truth from the code (the click command tree with
+every option, the Pydantic models, the configuration keys, and a small almanac file
+written by the real writers and decorated by `add metadata` with a fake catalog query)
+and checks the documentation against it: every `almanac ...` example resolves to real
+commands and options, every option named inline exists, the configuration reference lists
+exactly the configuration keys, the model tables of `data-formats.md` list exactly the
+model fields and aliases, and the tables marked `<!-- audit:table NAME -->` list exactly
+the night attributes, sequences, missing-exposures datasets, `/meta` attributes and side
+groups that are written. It also rejects public-web URLs, cluster-internal paths, the
+British spelling of "fiber" (outside the `--fibres` alias) and `--no-x-match` in examples. Run it
+after changing a command, a model or a writer:
 
 ```bash
-# Memory profiling
-mprof run almanac --mjd-start -30 --fibers
-mprof plot
-
-# Time profiling
-python -m cProfile -s cumulative -m almanac --mjd -7
+uv run python docs/audit_docs.py --repo . --out <folder>
 ```
 
-## Getting Help
+It needs no database and no raw data, writes `ground_truth.json`, `ground_truth.md` and
+`audit_report.md` to `<folder>`, and exits with status 1 if any check fails.
 
-### Development Support
+### Standards
 
-- **Issues**: Open GitHub issues for bugs and feature requests
-- **Discussions**: Use GitHub Discussions for questions
-- **Email**: Contact maintainers for sensitive issues
+- Every command, option, column and attribute is documented where users look for it
+  (`cli-reference.md`, `data-formats.md`) and in `--help`.
+- Examples are commands that work as written; the cross-match is always on.
+- `CHANGELOG.rst` records every user-facing change.
+- US spelling ("fiber").
 
-### Resources
+## Version Management
 
-- [Python Packaging Guide](https://packaging.python.org/)
-- [pytest Documentation](https://docs.pytest.org/)
-- [Click Documentation](https://click.palletsprojects.com/)
-- [SDSS Developer Documentation](https://sdss-python-dev.readthedocs.io/)
+The version is in `pyproject.toml` and `src/almanac/__init__.py` (`__version__ = "0.5.3"`);
+change both. The fork's version is one past the upstream release it last merged
+(upstream 0.5.2).
+
+## Contributing
+
+1. Branch from `main` (or from the branch your change depends on).
+2. Make the change with tests; run `uv run pytest -q --no-cov`.
+3. Update the documentation and `CHANGELOG.rst`; run the documentation audit.
+4. Open a pull request against the fork. Do not push to upstream.
+
+See `CONTRIBUTING.md` for how to share figures in issues and pull requests.
+
+## Debugging
+
+```bash
+almanac config set logging_level 10        # DEBUG logging
+almanac --mjd 60000 --apo -vv -p 1         # one night, in the main process
+python -m pdb -m almanac.cli --mjd 60000 --apo -p 1
+```
+
+Profile a night:
+
+```bash
+python -m cProfile -o profile.stats -m almanac.cli --mjd 60000 --apo -p 1
+python -c "import pstats; pstats.Stats('profile.stats').sort_stats('cumulative').print_stats(20)"
+```

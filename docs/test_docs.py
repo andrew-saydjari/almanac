@@ -78,7 +78,7 @@ def check_requirements():
         # Try to import key packages
         import_tests = [
             ('sphinx', 'Sphinx'),
-            ('sphinx_rtd_theme', 'ReadTheDocs theme'),
+            ('furo', 'furo theme (html_theme in conf.py)'),
         ]
         
         success = True

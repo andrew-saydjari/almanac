@@ -1,7 +1,17 @@
-almanac 
+almanac
 =======
 
-``almanac`` scrapes headers from raw image files and cross-matches those against the SDSS database to create a comprehensive summary of everything ever observed with an APOGEE instrument.
+``almanac`` scrapes headers from raw APOGEE image files and cross-matches them against the
+SDSS database to build a summary of everything observed with an APOGEE instrument: the
+exposures of every night, the sequences of exposures that form visits, and the
+fiber-to-target mapping of every plate and FPS configuration, with an SDSS identifier
+(``sdss_id``) for every target.
+
+This documentation is for the ``andrew-saydjari/almanac`` fork, version 0.5.3: upstream
+sdss/almanac 0.5.2 plus the fork's changes (exposure overrides and hand-placed targets,
+off-target fibers, the APOGEE ID cross-match through the maintainers' lookup table,
+``almanac add fibers``, a resumable ``almanac add metadata``, and Slurm-aware
+parallelism).
 
 .. image:: https://github.com/sdss/almanac/blob/main/docs/almanac-example-1.gif?raw=true
    :alt: almanac example
@@ -11,14 +21,16 @@ Quick Start
 
 .. code-block:: bash
 
-   # Install almanac
-   uv pip install git+https://github.com/sdss/almanac
+   # Install the fork
+   git clone https://github.com/andrew-saydjari/almanac.git
+   cd almanac
+   uv sync --frozen
 
-   # Query yesterday's observations
-   almanac --mjd -1 -vv
+   # Last night's exposures, with details
+   uv run almanac --mjd -1 -vv
 
-   # Query with fiber mappings
-   almanac --mjd -1 --fibers --output results.h5
+   # Last night's exposures and fiber mappings, written to a file
+   uv run almanac --mjd -1 --fibers --output results.h5
 
 Table of Contents
 -----------------
@@ -48,72 +60,39 @@ Table of Contents
 
    api/modules
 
-Installation
-------------
-
-At Utah
-~~~~~~~
-
-.. code-block:: bash
-
-   module load almanac
-
-Anywhere else
-~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   uv add sdss-almanac 
-
 Basic Usage
 -----------
 
-Query today's observations:
+The current night at both observatories:
 
 .. code-block:: bash
 
    almanac
 
-Query with details:
+One night, with details:
 
 .. code-block:: bash
 
-   almanac -vv --mjd -1
+   almanac -vv --mjd 60000
 
-Query with fiber mappings:
-
-.. code-block:: bash
-
-   almanac --mjd 60000 --fibers
-
-Save to file:
+With fiber mappings, written to a file:
 
 .. code-block:: bash
 
-   almanac --output results.h5 --mjd-start -7
+   almanac --mjd 60000 --fibers --output results.h5
 
 Key Features
 ------------
 
-- **Cross-platform**: Works at Utah and external installations
-- **Flexible queries**: Support for MJD and calendar date ranges
-- **Fiber analysis**: Complete fiber-to-target mapping analysis
-- **Structured output**: HDF5 files with organized data structure
-- **Observatory support**: Both Apache Point Observatory and Las Campanas Observatory
-- **Database integration**: Automatic cross-matching with SDSS database
-- **Performance optimized**: Parallel processing and efficient data handling
-
-Observatory Coverage
---------------------
-
-- **Apache Point Observatory (APO)**: New Mexico, USA
-- **Las Campanas Observatory (LCO)**: Chile
-
-Survey Support
---------------
-
-- **SDSS-IV**: Plate-based observations with APOGEE-2
-- **SDSS-V**: Fiber positioner system (FPS) with updated APOGEE
+- **Flexible night selection**: single MJDs or dates, ranges, and explicit lists
+- **Both observatories**: Apache Point Observatory (APO) and Las Campanas Observatory (LCO)
+- **Both eras**: SDSS-IV plates and the SDSS-V Fiber Positioning System (FPS)
+- **Fiber mappings**: every fiber's target, cross-matched to an ``sdss_id``
+- **Missing-exposure report**: every gap, with a reason
+- **Exposure overrides**: explicit, version-controlled corrections with their evidence
+- **Structured output**: one HDF5 file, updated night by night and resumable
+- **Catalog metadata**: astrometry, photometry and targeting flags per ``sdss_id``
+- **Parallel**: worker processes with a cap on database connections
 
 Indices and Tables
 ------------------

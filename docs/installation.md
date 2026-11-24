@@ -1,120 +1,99 @@
 # Installation Guide
 
-This guide covers installation of `almanac` in various environments.
+This guide covers installing this fork of `almanac` (`andrew-saydjari/almanac`, version
+0.5.3).
 
 ## Requirements
 
-- **Python**: 3.8 or higher
-- **System Requirements**: Access to raw APOGEE data frames (local disk or mounted filesystem)
-- **Database Access**: SDSS database access (automatic at Utah, requires whitelisting elsewhere)
+- **Python**: 3.11 or newer
+- **Raw data**: local (or mounted) access to the raw APOGEE frames, and to the plate,
+  plugmap and `sdsscore` (`confSummary`) files; see the path settings in the
+  [Configuration Guide](configuration.md#data-paths)
+- **Database**: access to the SDSS database (`sdss5db`), directly or through an SSH tunnel
 
-## Installation Methods
+## Installing the fork
 
-### 1. At Utah (SDSS Computing Environment)
+The `sdss-almanac` package on PyPI, and `uv pip install git+https://github.com/sdss/almanac`,
+install upstream's almanac, which does not have this fork's changes. Install the fork
+from its repository.
 
-The simplest installation method if you're working at Utah:
-
-```bash
-module load almanac
-```
-
-**Setting up Python Environment at Utah** (if needed):
-```bash
-module load miniconda/3.8.5_astra
-```
-
-### 2. Using uv (Recommended)
-
-Install using `uv` for dependency management:
+### With uv (recommended)
 
 ```bash
-uv pip install git+https://github.com/sdss/almanac
-```
-
-### 3. Using pip
-
-Standard pip installation:
-
-```bash
-pip install git+https://github.com/sdss/almanac
-```
-
-### 4. Development Installation
-
-For development work:
-
-```bash
-git clone https://github.com/sdss/almanac.git
+git clone https://github.com/andrew-saydjari/almanac.git
 cd almanac
-uv pip install -e ".[dev]"
+uv sync --frozen                 # creates .venv from uv.lock
+uv run almanac --help
+```
+
+### Into an existing environment
+
+```bash
+uv pip install -e /path/to/almanac        # or: pip install -e /path/to/almanac
+```
+
+### Development installation
+
+```bash
+uv sync --frozen --extra dev              # tests
+uv sync --frozen --extra dev --extra docs # tests and the Sphinx build
 ```
 
 ## Post-Installation Setup
 
-### Database Configuration
+### Database configuration
 
-If installing outside Utah, you'll need to:
-
-1. **Get database access**: Ensure your IP address is whitelisted for SDSS database access
-2. **Configure connection**: Use `almanac config` to set database parameters if needed
+The first run creates `~/.almanac/config.yaml` with the defaults. Set the host, port and
+user of the database you use, and put the password in `~/.pgpass` (or in a file named by
+`PGPASSFILE`):
 
 ```bash
-almanac config show  # View current configuration
-almanac config set sdssdb.host your-host-address
+almanac config show                         # current settings and the file path
+almanac config set sdssdb.host localhost    # e.g. through an SSH tunnel
+almanac config set sdssdb.port 63333        # the local end of the tunnel
 ```
 
-### Data Access Setup
+### Data paths
 
-**Outside Utah**: Set up Globus transfer for raw APOGEE data frames to ensure local disk access.
+Point `apogee_dir`, `sdsscore_dir`, `mapper_dir` and `platelist_dir` at the local copies
+of the raw data if the Utah defaults do not apply:
+
+```bash
+almanac config set apogee_dir <path to the raw APOGEE frames>/
+```
 
 ### Verification
-
-Verify installation:
 
 ```bash
 almanac --help
 almanac config show
-```
-
-Test basic functionality:
-
-```bash
-almanac --mjd -1  # Query yesterday's observations
+almanac --mjd 60000 --apo -vv         # one night, read from the raw files
 ```
 
 ## Dependencies
 
-Core dependencies are automatically installed:
+Installed automatically (see `pyproject.toml`; `uv.lock` pins the versions):
 
-- **Data Processing**: `numpy`, `astropy`, `h5py`
-- **Database**: `sdssdb`, `pydl`
+- **Data**: `numpy`, `scipy`, `astropy`, `pyerfa`, `h5py`, `healpy`, `pyyaml`, `pydl`
+- **Database**: `sdssdb`, `peewee`, `sdss-semaphore`
+- **Models**: `pydantic`, `pydantic-core`, `typing-extensions`
 - **CLI/Display**: `click`, `tqdm`, `rich`, `colorlog`
 
-Development dependencies (with `[dev]` install):
+Optional extras:
 
-- **Testing**: `pytest`, `pytest-cov`, `pytest-mock`
-- **Documentation**: `sphinx`, `sphinx_bootstrap_theme`
-- **Code Quality**: `flake8`, `isort`, `codecov`
+- **`dev`**: `pytest` and plugins, `flake8`, `isort`, `doc8`, `sphinx`, and other tools
+- **`docs`**: Sphinx, the `furo` theme, `myst-parser`, `sphinx-autodoc-typehints`,
+  `sphinx-copybutton`, `sphinxcontrib-bibtex`, `linkify-it-py`
 
 ## Troubleshooting
 
-### Common Issues
+**Database connection fails**: check the host, port and user in `almanac config show`,
+that the tunnel is up, and the `~/.pgpass` entry.
 
-**Database Connection Timeout**:
-- Check network connectivity to SDSS database
-- Verify IP whitelisting
-- Adjust `database_connect_time_warning` config if needed
+**Missing raw data**: check the path settings; nights without raw files produce no
+exposures.
 
-**Missing Raw Data**:
-- Ensure local access to APOGEE raw data frames
-- Set up proper filesystem mounts or Globus transfers
+**Permission errors**: almanac writes only the output file you name, its checkpoints
+(`add metadata`), and `~/.almanac/config.yaml`.
 
-**Permission Issues**:
-- Check file permissions for data directories
-- Ensure write access for output files
-
-### Getting Help
-
-- Check [FAQ](faq.md) for common issues
-- Open an issue on [GitHub](https://github.com/sdss/almanac/issues)
-- Contact the development team
+See the [FAQ](faq.md) for more.

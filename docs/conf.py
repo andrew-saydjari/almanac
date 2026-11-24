@@ -128,6 +128,10 @@ napoleon_use_rtype = True
 
 # -- Options for MyST parser ------------------------------------------------
 
+# Anchors for headings down to H4, so that links such as
+# `data-formats.md#night-attributes` resolve (as they do on GitHub).
+myst_heading_anchors = 4
+
 myst_enable_extensions = [
     'deflist',
     'tasklist',

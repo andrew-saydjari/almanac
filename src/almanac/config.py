@@ -30,9 +30,9 @@ class Config:
 
     # Default for --query-workers: the most database connections almanac's
     # worker processes hold at once. `almanac add metadata`: number of query
-    # worker processes (one connection each). Main `almanac` command: the most
-    # file-building workers that hold a connection at once (the others keep
-    # reading files). Keep this low: the database is shared and often reached
+    # worker processes (one connection each). Main `almanac` command and
+    # `almanac add fibers`: the most file-building workers that hold a
+    # connection at once (the others keep reading files). Keep this low: the database is shared and often reached
     # through a single SSH tunnel. (The number of file-building processes,
     # --processes, defaults to the CPU budget: Slurm SLURM_CPUS_ON_NODE, else
     # the CPU affinity, else all CPUs; see almanac/parallel.py.)

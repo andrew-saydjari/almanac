@@ -60,7 +60,8 @@ must equal ``recorded_config`` (checked when the entry is applied), and for
 ``use_config`` ``actual_config`` must equal ``config_id``. They let a
 ``not_science`` entry be switched to ``use_config`` later without
 re-deriving the configurations. Overrides are applied in one place,
-:func:`almanac.apogee.get_almanac_data`, and are never silent: affected
+:func:`almanac.apogee.process_night` (run by ``almanac`` and by ``almanac add
+fibers``), and are never silent: affected
 exposures carry the entry ids in ``override_ids`` and what was done in
 ``override_actions``; affected fibers carry ``override_id``. They can be
 switched off (``almanac --no-overrides``) so that their effect can be diffed.
@@ -625,7 +626,7 @@ def apply_exposure_overrides(exposures, entries: List[Override]) -> None:
 #: Fiber tables edited by an override are stored under a synthetic ID, which
 #: also replaces the exposure's `plate_id` (plates) or `config_id` (FPS): readers
 #: that key on that column -- ApogeeReduction.jl's `get_fibTargDict`, `almanac
-#: dump stars`/`spectra` -- then open the edited table without any change. The
+#: dump stars` -- then open the edited table without any change. The
 #: header value is kept in `original_plate_id` / `original_config_id`. IDs are
 #: OVERRIDE_TABLE_ID_BASE + (mjd - 50000) * 1000 + k (k = 1, 2, ... per night, in
 #: exposure order): positive (no code treats them as "missing"), far above any

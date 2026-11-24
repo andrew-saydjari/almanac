@@ -3,96 +3,145 @@
 Some exposures cannot be described correctly from their raw headers and the
 plugmap / confSummary files alone. `almanac` lists them, with the evidence, in
 one version-controlled file, `src/almanac/etc/exposure_overrides.yaml`, and
-applies them in one place (`almanac.apogee.get_almanac_data`).
+applies them in one place, `almanac.apogee.process_night`, which both `almanac` and
+`almanac add fibers` run for every night.
 
-## Entries
+## The override file
+
+```yaml
+version: 1
+overrides:
+  - id: apo-55755-aadaf-vesta-f203        # unique; lower case, digits, _ . -
+    observatory: apo
+    mjd: 55755
+    exposures: "19,22-23,29"              # an int, a list, or a range string
+    action: retarget_fibers
+    fibers: {203: VESTA}                  # retarget_fibers only: fiber_id -> target name
+    other_fibers: offtarget               # retarget_fibers only: keep | offtarget
+    reason: "..."
+    source: {file: "...", quote: "..."}   # exactly these two keys, verbatim quote
+    notes: "..."                          # optional
+```
 
 Each entry names an observatory, an MJD, a set of exposures and one action:
 
-| action | effect |
-|---|---|
-| `retarget_fibers` | the listed fibers saw a named object (not the plugmap target); the other fibers are kept or marked `offtarget` |
-| `use_config` | the fibers were at configuration `config_id`, not at the one in the header |
-| `use_previous_config` | the fibers were at the configuration of the previous object exposure with a different configuration |
-| `mark_exposure` | information only |
-| `not_science` | the exposure is not usable for science: `flagged_bad` is set |
+| action | effect | entries (0.5.3) |
+|---|---|---|
+| `retarget_fibers` | the listed fibers saw a named object (not the plugmap target); the other fibers are kept (`keep`) or marked `offtarget` | 145 |
+| `use_config` | the fibers were at configuration `config_id` (required key), not at the one in the header | 0 |
+| `use_previous_config` | the fibers were at the configuration of the previous object exposure of the night with a different configuration | 0 |
+| `mark_exposure` | information only: the exposure is labeled in `override_ids`/`override_actions` | 0 |
+| `not_science` | the exposure is not usable for science: `flagged_bad` is set (its exposure row and fiber table are still written) | 72 |
 
-Every entry has a `reason` and a `source` (`file` and a verbatim `quote`),
-and may have `notes`. FPS entries may also record `recorded_config` (the
-configuration in the header) and `actual_config` (where the fiber
-positioners really were). The two are given together; when present, almanac
-checks that each listed exposure's header configuration equals
-`recorded_config`, and for `use_config` that `actual_config` equals
-`config_id`.
+Every entry has a `reason` and a `source` (`file` and a verbatim `quote`), and may have
+`notes`. FPS entries may also record `recorded_config` (the configuration in the header)
+and `actual_config` (where the fiber positioners really were). The two are given
+together and must differ; when present, almanac checks that each listed exposure is an
+FPS exposure whose header configuration equals `recorded_config`, and for `use_config`
+that `actual_config` equals `config_id`. They let a `not_science` entry be switched to
+`use_config` later without re-deriving the configurations.
+
+`use_config` and `use_previous_config` apply only to FPS object exposures. They replace
+`config_id` (the header value is kept in `original_config_id`) and take `design_id` and
+`field_id` from the new configuration's confSummary file, before the sequences are built,
+so the exposure joins the new configuration's visit.
 
 Overrides are never silent: affected exposures carry `override_ids` and
-`override_actions`, affected fibers carry `override_id`, and each night
-records `exposure_overrides` (`enabled`/`disabled`) and the file's SHA-256.
-`almanac --no-overrides` switches them all off so that their effect can be
-diffed. A malformed file, an unknown action or key, conflicting entries, an
-entry naming an exposure that does not exist, or a `recorded_config` that
-does not match the header all raise `OverrideError`.
+`override_actions`, affected fibers carry `override_id`, and each night records
+`exposure_overrides` (`enabled`/`disabled`) and the SHA-256 of the override and
+hand-placed targets files ([night attributes](data-formats.md#night-attributes)).
+`almanac --no-overrides` switches them all off so that their effect can be diffed.
+
+A malformed file, an unknown action or key, a missing required key, two entries with the
+same id, two configuration overrides of one exposure, two `retarget_fibers` entries on
+one exposure that share a fiber or of which one marks the other fibers `offtarget`
+(combine them into one entry), an entry naming an exposure that
+does not exist, a `retarget_fibers` entry on an exposure that is not an object exposure,
+a fiber name that is not a hand-placed target, or a `recorded_config` that does not
+match the header all raise `OverrideError`. A malformed file fails before any night is
+processed.
+
+Editing either file changes the SHA-256 recorded on every night built afterwards, and
+`almanac add fibers` refuses nights whose stored exposures would change under the
+current list (rebuild them with `almanac`).
 
 ## Hand-placed objects (`retarget_fibers`)
 
 Every object named in a `retarget_fibers` entry must be a target of
-`src/almanac/etc/handplaced_targets.yaml`, which holds its targeting
-information: a 2MASS designation (or an SDSS-V `catalogid`) and ICRS J2000
-ra/dec for a star, or `kind: solar_system` for a body such as Vesta. The file
-is generated by `scripts/handplaced_targets/resolve_targets.py`.
+`src/almanac/etc/handplaced_targets.yaml`:
 
-Each affected exposure gets its own fiber table, stored under a synthetic ID
-that **replaces the exposure's `plate_id`** (FPS: `config_id`): readers that
-key on that column, such as ApogeeReduction.jl's `get_fibTargDict` and
-`almanac dump stars`, open the edited table with no change. The header value is
-kept in the exposure columns `original_plate_id` / `original_config_id` (which
-equal `plate_id` / `config_id` for every other exposure; `use_config` also
-records the header configuration there). The IDs are
-`1_000_000_000 + (mjd - 50000) * 1000 + k` (`k` = 1, 2, ... per night), far
-above any real plate or configuration ID; exposures of one plate with the same
-entries share one table. The ID is given before sequences are built, so an
-edited exposure is not part of the plate's visit; `fiber_map_key` is always
-`str(plate_id)` (FPS: `str(config_id)`).
+```yaml
+version: 1
+solar_system_sdss_id: 0
+targets:
+  HD 93288:
+    kind: star
+    ra: 161.704269                  # ICRS J2000, degrees
+    dec: 33.5596872
+    twomass_designation: "..."      # 8 digits, sign, 7 digits; or a catalogid if none
+  VESTA:
+    kind: solar_system
+    jpl_horizons_id: '4'
+```
+
+A star needs `ra`, `dec` and a `twomass_designation` or a `catalogid`; a solar-system body
+needs `jpl_horizons_id`. Other keys (SIMBAD identifiers, proper motions, provenance) are
+kept for reference and ignored by almanac. The file is generated by
+`scripts/handplaced_targets/resolve_targets.py`; do not edit it by hand.
+
+Each affected exposure gets a fiber table of its own, stored under a synthetic ID that
+**replaces the exposure's `plate_id`** (FPS: `config_id`): readers that key on that column,
+such as ApogeeReduction.jl's `get_fibTargDict` and `almanac dump stars`, open the edited
+table with no change. The header value is kept in the exposure columns
+`original_plate_id` / `original_config_id` (which equal `plate_id` / `config_id` for every
+other exposure; `use_config` also records the header configuration there). The IDs are
+`1_000_000_000 + (mjd - 50000) * 1000 + k` (`k` = 1, 2, ... per night), far above any real
+plate or configuration ID (see [Synthetic fiber-table IDs](data-formats.md#synthetic-fiber-table-ids)
+for what this means for joins). Exposures of one plate with the same entries share one
+table, except that every exposure with a solar-system body gets its own. The ID is given
+before sequences are built, so an edited exposure is not part of the plate's visit;
+`fiber_map_key` is always `str(plate_id)` (FPS: `str(config_id)`).
 
 The fiber edits are applied **before** the cross-match. In each edited table:
 
-- the named fiber's row is rewritten with the object's targeting
-  information. A star becomes category `science` with the star's
-  designation, ra and dec, and is then cross-matched to an `sdss_id` by the
-  ordinary path, exactly like a plugged fiber; `almanac add metadata`
-  decorates it in the same way. A solar-system body (Vesta) also becomes
-  `science`, so it is reduced, but is not cross-matched: it gets
-  `sdss_id = solar_system_sdss_id` (0, a setting in the targets file), no
-  designation, and ra/dec = the raw-header RA/DEC of that exposure (each
-  such exposure gets its own table). `almanac add metadata` writes a fixed
-  `/meta` row for that `sdss_id` (lead `solar_system`, all catalogue columns
-  at their defaults) without a database query, and `almanac dump stars`
-  counts it;
+- the named fiber's row is rewritten with the object's targeting information. A star
+  becomes category `science` with the star's designation (or catalogid), ra and dec, and
+  is then cross-matched to an `sdss_id` by the ordinary path, exactly like a plugged
+  fiber; `almanac add metadata` decorates it in the same way. A solar-system body (Vesta)
+  also becomes `science`, so it is reduced, but is not cross-matched: it gets
+  `sdss_id = solar_system_sdss_id` (0, a setting in the targets file, not an SDSS
+  convention; the SDSS database has no `sdss_id` 0), no designation, and ra/dec = the
+  raw-header RA/DEC of that exposure. `almanac add metadata` writes a fixed `/meta` row
+  for that `sdss_id` (`lead = "solar_system"`, all catalog columns at their defaults)
+  without a database query, and `almanac dump stars` counts it;
 - `original_category`, `override_id`, `override_target` and `override_kind`
   (`star` or `solar_system`) record the change;
-- with `other_fibers: offtarget`, every other fiber that asserts a target
-  becomes `offtarget` (no `sdss_id`).
+- with `other_fibers: offtarget`, every other fiber that asserts a target becomes
+  `offtarget` (no `sdss_id`), with `original_category` and `override_id` set. Every
+  shipped entry uses `offtarget`: the telescope was pointed away from the plate field.
 
-The nights also record `handplaced_targets_sha256`. The 2011 hand-placed-star
-tests are a generated block of the override file; see
-`scripts/handplaced_targets/README.md` for the inventory and the data check
-behind it.
+All shipped `retarget_fibers` entries are plate-era nights (2011). Retargeting an FPS
+fiber is not supported yet: the row rewrite sets plate-era columns and fails on an FPS
+fiber table.
+
+The 2011 hand-placed-star tests are a generated block of the override file; see
+`scripts/handplaced_targets/README.md` for the inventory, the rebuild scripts and the data
+check behind it. The APO 55755 entries (Vesta and five stars) are written by hand above
+the block.
 
 ## "Robots not moved" exposures
 
-The largest group of entries is generated by
-`scripts/robots_not_moved/robots_not_moved.py` from the operations (jaeger)
-logs; its README states the rule. These are FPS exposures where a new
-configuration B was loaded and recorded in the header, but the fiber
-positioners were not moved and were still at the previous configuration A,
-so the light in the fibers does not belong to the recorded targets.
+The largest group of `not_science` entries (55 entries, 94 exposures) is generated by
+`scripts/robots_not_moved/robots_not_moved.py` from the operations (jaeger) logs; its
+README states the rule. These are FPS exposures where a new configuration B was loaded
+and recorded in the header, but the fiber positioners were not moved and were still at
+the previous configuration A, so the light in the fibers does not belong to the recorded
+targets.
 
-**For 0.4.1 they are all marked bad (`not_science`).** This is the
-conservative choice. The light is real starlight from configuration A, and
-the fiber-level data check recovered the true target for most affected
-fibers. After 0.4.1 we want to come back and try to save some of these
-exposures by switching their entries to `use_config <A>` (the entry's
-`actual_config`) for the whole exposure. It has to be the whole exposure,
-not individual fibers, because fibers that B treats as sky carried A's
-stars, so B's sky fibers are wrong as well. Only exposures whose data check
-says the light follows A are candidates.
+**Since 0.4.1 they are all marked bad (`not_science`).** This is the conservative choice.
+The light is real starlight from configuration A, and the fiber-level data check
+recovered the true target for most affected fibers. We want to come back and try to save
+some of these exposures by switching their entries to `use_config <A>` (the entry's
+`actual_config`) for the whole exposure. It has to be the whole exposure, not individual
+fibers, because fibers that B treats as sky carried A's stars, so B's sky fibers are
+wrong as well. Only exposures whose data check says the light follows A are candidates.

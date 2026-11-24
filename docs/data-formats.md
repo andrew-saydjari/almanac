@@ -1,49 +1,76 @@
 # Data Formats
 
-This document describes the data models and formats used by `almanac`, which are built using Pydantic for type validation and structured data handling.
+This page describes the HDF5 file `almanac --output` writes, the Pydantic models its
+tables are made from, and what downstream code reads. Every group, dataset and attribute
+listed here is checked against the writers by the documentation audit script (see
+[Development](development.md#documentation-audit)).
 
-## Data Model Architecture
+## HDF5 Output Structure
 
-`almanac` uses three main Pydantic data models to represent SDSS survey data:
+```
+filename.h5
+├── raw/
+│   └── {observatory}/                 # apo, lco
+│       └── {mjd}/                     # one group per night; attributes: see "Night attributes"
+│           ├── exposures/             # one dataset per Exposure column, one row per
+│           │                          #   exposure number 1..N
+│           ├── sequences/             # objects, arclamps, missing: Nx2 int64
+│           │                          #   (first, last) exposure numbers
+│           └── fibers/                # with --fibers (or `almanac add fibers`)
+│               └── {id}/              # one dataset per fiber column: FPSTarget rows
+│                                      #   (key config_id) or PlateTarget rows (key plate_id)
+├── missing_exposures/                 # run-level missing-exposures report
+├── meta/                              # `almanac add metadata`: one row per sdss_id
+├── meta_not_found/                    #   ids queried but not in the catalog
+└── meta_carton_pks/                   #   every (sdss_id, carton_pk) pair
+```
 
-- **`Exposure`**: Metadata for individual exposures/observations
-- **`FPSTarget`**: Target information for SDSS-V Fiber Positioning System observations
-- **`PlateTarget`**: Target information for SDSS-IV plate-based observations
+Every table is a group of equal-length one-dimensional datasets (one per column), each
+with a `description` attribute where the model gives one. Strings are fixed-length byte
+strings (`|S<n>`); booleans are `bool`; integers `int64`; floats `float64`.
 
-These models provide type validation, automatic conversion, and structured access to survey data.
+An `almanac add metadata --output` targets file holds only `meta`, `meta_not_found` and
+`meta_carton_pks`, and the root attribute `written_by`.
 
 ## Exposure Model
 
-The `Exposure` model (`almanac.data_models.Exposure`) represents the metadata for a single astronomical exposure.
+`raw/<obs>/<mjd>/exposures` has one row per exposure number from 1 to the larger of the
+highest number on disk and the highest number the operations database knows; row `i` is
+exposure `i`. Numbers with no file get a row with `image_type = "missing"` and default
+values elsewhere. Columns come from `almanac.data_models.Exposure`; aliases are the raw
+header keywords.
 
 ### Basic Information
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `observatory` | `Observatory` | Observatory name ("apo" or "lco") |
-| `mjd` | `int` | Modified Julian Date |
-| `exposure` | `int` | Exposure number (≥ 1) |
-| `prefix` | `Optional[Prefix]` | Raw exposure basename prefix ("apR", "asR") |
+| `mjd` | `int` | MJD of the night |
+| `exposure` | `int` | Exposure number within the night (≥ 1) |
+| `prefix` | `Optional[Prefix]` | Raw file basename prefix ("apR" at APO, "asR" at LCO) |
+| `file_size` | `int` | Size of the raw file in bytes (-1 for missing exposures) |
 
 ### Exposure Metadata
 
 | Field | Type | Alias | Description |
 |-------|------|-------|-------------|
-| `name` | `str` | | Plugged plate name or configuration identifier |
+| `name` | `str` | | Header NAME (in the plate era the plugged plate name `<plate>-<plugged mjd>-<iteration>`, e.g. `5099-55753-01`; `0000-00000-00` in the FPS era) |
 | `n_read` | `int` | `nread` | Number of detector reads (≥ 0) |
-| `image_type` | `ImageType` | `imagetyp` | Image type (see ImageType literals) |
-| `observer_comment` | `str` | `obscmnt` | Observer comments |
+| `image_type` | `ImageType` | `imagetyp` | Image type, lower case; `twilightflat` also when the observer comment mentions a sky or twilight flat |
+| `observer_comment` | `str` | `obscmnt` | Observer comment (stripped; "None" becomes empty) |
 
 ### Survey Identifiers
 
 | Field | Type | Alias | Description |
 |-------|------|-------|-------------|
 | `map_id` | `int` | `mapid` | Map identifier |
-| `cart_id` | `int` | `cartid` | Cartridge ID |
-| `plate_id` | `int` | `plateid` | Plate ID (SDSS-IV) |
+| `cart_id` | `int` | `cartid` | Cartridge ID (0 for "FPS") |
+| `plate_id` | `int` | `plateid` | Plate ID (plate era); a synthetic ID ≥ 1,000,000,000 when an exposure override gave the exposure its own fiber table |
 | `field_id` | `int` | `fieldid` | Field identifier |
 | `design_id` | `int` | `designid` | Design identifier |
-| `config_id` | `int` | `configid` | Configuration ID (SDSS-V) |
+| `config_id` | `int` | `configid` | Configuration ID (FPS era); changed by a `use_config` override, synthetic as for `plate_id` |
+
+Missing identifiers are -1.
 
 ### Observing Conditions
 
@@ -58,19 +85,29 @@ The `Exposure` model (`almanac.data_models.Exposure`) represents the metadata fo
 | `focus` | `float` | | Focus position |
 | `collpist` | `float` | | Collimator piston |
 | `colpitch` | `float` | | Collimator pitch |
-| `dithered_pixels` | `float` | `dithpix` | Dither offset in pixels |
-| `lamp_quartz` | `int` | `lampqrtz` | Quartz lamp state (-1, 0, 1) |
+| `dithered_pixels` | `float` | `dithpix` | Dither position in pixels |
+| `lamp_quartz` | `int` | `lampqrtz` | Quartz lamp state (-1 unknown, 0 off, 1 on) |
 | `lamp_thar` | `int` | `lampthar` | ThAr lamp state (-1, 0, 1) |
 | `lamp_une` | `int` | `lampune` | UNe lamp state (-1, 0, 1) |
+
+### Exposure Overrides
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `override_ids` | `str` | `;`-separated ids of the exposure overrides applied to this exposure (empty if none) |
+| `override_actions` | `str` | `;`-separated description of what each did, e.g. `not_science`, `use_config(B->A)`, `retarget_fibers(203=VESTA;others=offtarget)` |
 
 ### Computed Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `exposure_string` | `str` | Formatted exposure string for file paths |
-| `fps` | `bool` | Whether this is from the FPS era |
-| `flagged_bad` | `bool` | Whether exposure is flagged as bad |
-| `chip_flags` | `int` | Bitmask indicating available chips |
+| `exposure_string` | `str` | Eight-digit exposure number used in raw file names: `max(0, (mjd - 55562) * 10000) + exposure` |
+| `fps` | `bool` | FPS era: MJD ≥ 59423 at APO, ≥ 59809 at LCO |
+| `flagged_bad` | `bool` | Listed in `src/almanac/etc/bad_exposures.csv`, or an object exposure with no plate (plate era) or configuration (FPS era) ID, or marked `not_science` by an exposure override |
+| `chip_flags` | `int` | Which raw chip files exist: bit 0 chip a, bit 1 chip b, bit 2 chip c (7 = all three) |
+| `fiber_map_key` | `str` | Name of this exposure's table under `fibers/`: always `str(config_id)` (FPS) or `str(plate_id)` (plate era) |
+| `original_plate_id` | `int` | Plate ID from the raw header; differs from `plate_id` only when an exposure override gave the exposure its own fiber table |
+| `original_config_id` | `int` | Configuration ID from the raw header; differs from `config_id` only when an override changed the configuration or gave the exposure its own fiber table |
 
 ### Type Definitions
 
@@ -80,15 +117,50 @@ The `Exposure` model (`almanac.data_models.Exposure`) represents the metadata fo
 
 **`ImageType`**: `Literal["blackbody", "dark", "object", "domeflat", "arclamp", "twilightflat", "internalflat", "quartzflat", "missing"]`
 
+## Sequences
+
+`raw/<obs>/<mjd>/sequences` holds three datasets, always present (shape `(0, 2)` when
+empty), each an `N x 2` int64 array of inclusive (first, last) exposure numbers, in
+exposure order:
+
+<!-- audit:table sequences -->
+| Dataset | Definition |
+|---------|------------|
+| `objects` | Runs of consecutive `object` exposures with the same `field_id`, `plate_id` and `config_id` (after the exposure overrides, so an exposure with its own synthetic fiber-table ID is a run of its own) |
+| `arclamps` | Runs of `arclamp` exposures with the same `dithered_pixels`, where `dark` exposures do not interrupt a run. Darks are selected together with the arc lamps, so leading or trailing darks are inside a range, and a run of darks alone (same dither) is also an entry |
+| `missing` | Runs of exposure numbers with `image_type = "missing"` |
+
+The object sequences are the visits of a night. They decide which exposures' fiber
+targets are cross-matched: the first exposure of each object sequence (and, on nights
+with exposure overrides, the first object exposure of every fiber table). The fiber table
+of a plate or configuration is written from the first object exposure that used it, which
+always starts an object sequence. `almanac add fibers` recomputes the sequences and
+refuses a night where they differ from the stored ones. `almanac dump visits` is not
+implemented, and `almanac dump stars` counts nights, not sequences.
+
+## Fiber Tables
+
+`raw/<obs>/<mjd>/fibers/<id>` holds one table per plate or FPS configuration observed
+that night (`--fibers`). `<id>` is the `fiber_map_key` of the exposures that used it:
+their `config_id` (FPS era) or `plate_id` (plate era). To find the fibers of an exposure,
+open `fibers/<config_id>` or `fibers/<plate_id>` of its row in the exposures table.
+
+FPS tables have one row per APOGEE fiber, 300 rows sorted by `fiber_id`: fibers that the
+`confSummary` file does not list (the FPI fibers, which have no positioner) get a stub row
+with `category = "bonus"` and NaN coordinates. The `confSummary` flavor is the first that
+exists of `confSummaryFS`, `confSummaryS` and `confSummary`. Plate tables have one row per
+plugged fiber matched to its planned hole, sorted by `fiber_id`.
+
 ## FPSTarget Model
 
-The `FPSTarget` model (`almanac.data_models.FPSTarget`) represents targets observed with the SDSS-V Fiber Positioning System.
+`almanac.data_models.FPSTarget`: SDSS-V Fiber Positioning System fibers. Aliases are the
+`confSummary` column names.
 
 ### Target Identification
 
 | Field | Type | Alias | Description |
 |-------|------|-------|-------------|
-| `sdss_id` | `Int64` | | SDSS unique identifier |
+| `sdss_id` | `Int64` | | SDSS identifier from the cross-match (-1 if none) |
 | `catalogid` | `Int64` | | Catalog identifier |
 | `twomass_designation` | `str` | `tmass_id` | 2MASS designation |
 | `category` | `Category` | | Target category (see "Off-target fibers", below) |
@@ -173,26 +245,36 @@ The `FPSTarget` model (`almanac.data_models.FPSTarget`) represents targets obser
 | `too_id` | `int` | TOO identifier |
 | `too_program` | `str` | TOO program name |
 
+### Exposure Override Columns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `override_id` | `str` | Id of the exposure override that changed this fiber (empty if none) |
+| `override_target` | `str` | Name of the object an override says was in this fiber (a target of `handplaced_targets.yaml`; empty if none) |
+| `override_kind` | `str` | `star` (cross-matched as usual) or `solar_system` (not cross-matched; `sdss_id` set by the override); empty if none |
+
 ## PlateTarget Model
 
-The `PlateTarget` model (`almanac.data_models.PlateTarget`) represents targets observed with SDSS-IV plates.
+`almanac.data_models.PlateTarget`: SDSS-IV plate fibers, from the plugmap
+(`plPlugMapM`) matched to the planned holes (`plateHoles`).
 
 ### Target Identification
 
 | Field | Type | Alias | Description |
 |-------|------|-------|-------------|
-| `sdss_id` | `Int64` | | SDSS unique identifier |
+| `sdss_id` | `Int64` | | SDSS identifier from the cross-match (-1 if none) |
 | `catalogid` | `Int64` | | Catalog identifier |
-| `twomass_designation` | `str` | | Computed 2MASS designation |
+| `twomass_designation` | `str` | | 2MASS designation computed from `twomass_id` (computed property) |
 | `twomass_id` | `str` | `tmass_id` | 2MASS ID |
 | `target_ids` | `str` | `targetids` | Target ID string |
-| `category` | `Category` | `targettype` | Target category |
+| `category` | `Category` | `targettype` | Target category (plate `sky` becomes `sky_apogee`, `standard` becomes `standard_apogee`, `na` becomes empty) |
+| `original_category` | `Category` | | Plugmap category, kept only when `almanac` has changed `category` (exposure overrides) |
 
 ### Survey Information
 
 | Field | Type | Alias | Description |
 |-------|------|-------|-------------|
-| `observatory` | `Observatory` | | Observatory for mapping fixes |
+| `observatory` | `Observatory` | | Observatory (used by the fiber mapping fixes) |
 | `hole_type` | `HoleType` | `holeType` | Hole type |
 | `planned_hole_type` | `HoleType` | `holetype` | Planned hole type |
 | `obj_type` | `ObjType` | `objType` | Object type |
@@ -256,11 +338,19 @@ The `PlateTarget` model (`almanac.data_models.PlateTarget`) represents targets o
 | `buffer` | `float` | Buffer size |
 | `priority` | `int` | Target priority |
 
+### Exposure Override Columns
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `override_id` | `str` | Id of the exposure override that changed this fiber (empty if none) |
+| `override_target` | `str` | Name of the hand-placed object in this fiber (empty if none) |
+| `override_kind` | `str` | `star` or `solar_system` (empty if none) |
+
 ## Type Definitions
 
 ### Category Types
 
-**`Category`**: `Literal["", "bonus", "science", "veto_location_boss", "veto_location_apogee", "sky_apogee", "sky_boss", "standard_apogee", "standard_boss", "open_fiber", "unplugged", "offtarget"]`
+**`Category`**: `Literal["", "bonus", "science", "veto_location_boss", "veto_location_apogee", "sky_apogee", "sky_boss", "standard_apogee", "standard_boss", "open_fiber", "unplugged", "offtarget", "retargeted"]`
 
 `veto_location_boss` and `veto_location_apogee` appear in manually built FPS
 designs. They are APOGEE fibers placed on real catalog stars: Gaia bright-neighbor
@@ -273,9 +363,14 @@ assert a target identity, so an assigned-but-off-target one is relabeled
 `offtarget` (see "Off-target fibers", below). The full list of categories
 treated as identified stars is `almanac.data_models.types.IDENTIFIED_STAR_CATEGORIES`.
 
+`retargeted` is no longer written: hand-placed objects are `science` with
+`override_target`/`override_kind` set. It is still accepted so that older files and
+tests validate. Fibers with category `unplugged`, `offtarget` or `retargeted` are never
+cross-matched.
+
 ### Hole Types
 
-**`HoleType`**: `Literal["object", "coherent_sky", "guide", "light_trap", "alignment", "quality", "manga", "manga_single", "manga_alignment", "acquisition_center", "acquisition_offaxis", "apogee", "center", "trap", "boss", "apogee_shared", "apogee_south", "bosshalf", "boss_shared", "fps"]`
+**`HoleType`**: `Literal["object", "coherent_sky", "guide", "light_trap", "alignment", "quality", "manga", "manga_single", "manga_alignment", "acquisition_center", "acquisition_offaxis", "apogee", "center", "trap", "boss", "apogee_shared", "apogee_south", "bosshalf", "boss_shared", "fps", "unplugged"]`
 
 ### Object Types
 
@@ -287,19 +382,19 @@ treated as identified stars is `almanac.data_models.types.IDENTIFIED_STAR_CATEGO
 
 The Pydantic models include automatic validation and cleaning:
 
-- **Empty strings to integers**: Convert empty strings to default integer values
-- **Lamp states**: Convert 'F'/'T' strings to 0/1 integers
-- **Float validation**: Handle invalid values by setting to NaN
-- **Case normalization**: Automatic lowercase conversion for categorical fields
-- **Comment sanitization**: Clean observer comments and handle None values
+- **Empty strings to integers**: empty identifiers become -1
+- **Lamp states**: 'F'/'T' (or '0'/'1') become 0/1; anything else -1
+- **Float validation**: values that cannot be converted become NaN
+- **Case normalization**: image types, hole types and object types are lower case
+- **Comment sanitization**: observer comments are stripped, "None" becomes empty
 
 ### Model Validators
 
 #### Exposure Model
-- Validates prefixes based on observatory
+- Sets the prefix from the observatory when it is not given
 - Sanitizes observer comments
-- Converts lamp states from boolean strings
-- Automatically detects twilight flats from comments
+- Converts lamp states
+- Relabels sky and twilight flats as `twilightflat` from the observer comment
 
 #### FPSTarget Model
 - Fixes early fiber mapping duplicates for spectrograph 2
@@ -322,7 +417,7 @@ identifiers for these fibers. `almanac` therefore relabels them:
 |-------|------------------|
 | `category` | `offtarget` |
 | `original_category` | the category the configuration summary file reported (e.g. `science`) |
-| `sdss_id` | `-1` (never cross-matched, exactly as for sky and unplugged fibers) |
+| `sdss_id` | `-1` (never cross-matched, as for unplugged fibers) |
 
 The predicate is `assigned == 1 and on_target == 0`, and it is applied only to
 categories that assert a target identity: sky, unplugged, and empty categories
@@ -332,53 +427,67 @@ are left alone. Everything else the configuration summary file reported —
 unchanged, so these fibers stay identifiable and the relabeling is reversible.
 
 The plate era has no equivalent columns, so `PlateTarget` rows are never
-relabeled.
+relabeled this way (an exposure override can still mark plate fibers `offtarget`, see
+[Exposure Overrides](exposure-overrides.md)).
 
 #### PlateTarget Model
-- Applies historical fiber mapping fixes for specific MJD ranges
+- Applies historical fiber mapping fixes for specific plugged-MJD ranges at APO
+  (`fix_fiber_flag` records it)
 - Translates plate-era categories to FPS-era equivalents
-- Handles observatory-specific fiber corrections
 
-### Computed Properties
+## Synthetic fiber-table IDs
 
-Models include computed properties that provide additional derived information:
+An exposure whose fibers an exposure override edits (`retarget_fibers`) gets its own fiber
+table under a synthetic ID, `1_000_000_000 + (mjd - 50000) * 1000 + k` (`k` = 1, 2, ... per
+night), that **replaces its `plate_id`** (FPS: `config_id`) in the exposures table. The
+header value is kept in `original_plate_id` (`original_config_id`). Anyone joining on
+`plate_id` or `config_id` should therefore:
 
-- **Exposure strings**: Formatted identifiers for file paths
-- **Era detection**: Automatic FPS/plate era classification
-- **Quality flags**: Bad exposure detection
-- **2MASS designations**: Standardized target identifiers
+- treat IDs ≥ 1,000,000,000 as almanac fiber tables, not plates or configurations
+  (`almanac.overrides.is_override_table_id`);
+- join on `original_plate_id`/`original_config_id` to get the plate or configuration the
+  exposure was taken with;
+- note that each such exposure is an object sequence of its own, because the ID differs
+  from the plate's.
 
-## HDF5 Output Structure
+## Night attributes
 
-When saving data, `almanac` organizes the Pydantic model data into HDF5 format:
+Each `raw/<obs>/<mjd>` group records how the night was built (written by both `almanac`
+and `almanac add fibers`):
 
-```
-filename.h5
-├── raw/
-│   └── {observatory}/               # Observatory (apo/lco)
-│       └── {mjd}/                   # Modified Julian Date
-│           ├── exposures            # Exposure model data
-│           ├── sequences/           # Per image type: Nx2 array of exposure
-│           │   └── {image_type}     #   numbers (inclusive) forming a sequence
-│           └── fibers/              # Target model data (with --fibers)
-│               └── {id}             # FPSTarget data by config_id, or
-│                                    #   PlateTarget data by plate_id
-├── missing_exposures/               # Run-level missing-exposures report
-└── meta/                            # Astrometry, photometry, and targeting
-                                     #   flags (from `almanac add metadata`),
-                                     #   one row per unique sdss_id
-```
+<!-- audit:table night_attrs -->
+| Attribute | Meaning |
+|-----------|---------|
+| `exposure_overrides` | `enabled` or `disabled` (`--no-overrides`) |
+| `exposure_overrides_sha256` | SHA-256 of the packaged `exposure_overrides.yaml` (only when enabled) |
+| `handplaced_targets_sha256` | SHA-256 of the packaged `handplaced_targets.yaml` (only when enabled) |
+| `apogee_id_lookup_source` | `materialized_view` (the configured lookup relation was read; the value is the same when that relation is a table) or `live_join` |
+| `apogee_id_lookup_mode` | `targeted` (per-night queries) or `full` (`--full-apogee-id-lookup`) |
+| `apogee_id_lookup_view` | Name of the relation read (empty with the live join) |
+| `apogee_id_lookup_view_kind` | What that relation is: `table`, `materialized view`, ... (empty with the live join) |
+| `apogee_id_lookup_view_last_refreshed` | Date from its `Last refreshed: YYYY-MM-DD` comment (empty if none) |
+| `apogee_id_lookup_view_comment` | Its comment |
+| `apogee_id_lookup_staleness_warnings` | `; `-separated staleness warnings (empty if none) |
+| `apogee_id_lookup_note` | Why the live join was used (empty when the relation was read) |
 
-### Missing-Exposures Report
+The `apogee_id_lookup_*` attributes are written only when targets were cross-matched
+(`--fibers` without `--no-x-match`). Files built before these features lack the
+attributes.
 
-The run-level `/missing_exposures` group records every exposure that was expected but not found, comparing the exposures on disk against the exposure numbers known to the operations database. It contains parallel datasets:
+## Missing-Exposures Report
 
+The run-level `/missing_exposures` group records every exposure that was expected but not
+found, comparing the exposures on disk against the exposure numbers known to the
+operations database (queried from MJD 59558, `sdssdb_exposure_min_mjd`). It contains
+parallel datasets:
+
+<!-- audit:table missing_exposures -->
 | Dataset | Type | Description |
 |---------|------|-------------|
 | `observatory` | string | Observatory ("apo" or "lco") |
-| `mjd` | integer | Modified Julian Date |
+| `mjd` | integer | MJD of the night |
 | `exposure` | integer | Missing exposure number (`-1` for the `db_unavailable` sentinel) |
-| `expected_max_db` | integer | Highest exposure number known to the database for that night |
+| `expected_max_db` | integer | Highest exposure number known to the database for that night (-1 if unknown) |
 | `reason` | string | Reason code (see below) |
 
 **Reason codes**:
@@ -391,48 +500,124 @@ The run-level `/missing_exposures` group records every exposure that was expecte
 | `file_no_db` | A file exists on disk, but the operations database has no record of it |
 | `db_unavailable` | Sentinel (`exposure = -1`) recording that the database could not be reached for this night, so trailing missing exposures are undetectable |
 
-Entries are refreshed per observatory/MJD pair on each run; pairs skipped via `--skip-existing` keep their previous entries. Exposures identified as missing on disk also appear in `raw/{observatory}/{mjd}/exposures` with `image_type="missing"` so that exposure numbering stays dense.
+Entries are refreshed per observatory/MJD pair on each run; pairs not processed in a run
+(skipped with `--skip-existing`, or failed) keep their previous entries. Exposures missing
+on disk also appear in `raw/{observatory}/{mjd}/exposures` with `image_type="missing"` so
+that exposure numbering stays dense.
 
-### Data Access
+## Catalog metadata (`/meta`)
 
-**Python Example**:
+`almanac add metadata` writes `/meta`: one row per `sdss_id`, sorted, with the columns of
+`almanac.data_models.source.Source` (identifiers of the catalogs the `sdss_id` is matched
+to, Gaia DR3 astrometry, photometry and radial velocities, 2MASS photometry, target of
+opportunity, and the `sdss5_target_flags` bitmask), plus the 79 columns of
+`ExtendedSource` (groups in the `extended_column_groups` attribute) with `--extended`.
+Each column has a `description` attribute. A hand-placed solar-system body has a fixed
+row: `sdss_id = 0`, `lead = "solar_system"`, every catalog column at its default.
+
+The width of `sdss5_target_flags` (bytes per row) depends on the installed
+`sdss-semaphore`, which can only encode the cartons it knows (recorded in the
+`sdss_semaphore_version` attribute; unknown cartons are listed in `unknown_carton_pks`
+and kept in `meta_carton_pks`). For example, sdss-semaphore 0.2.9 gives 73 bytes where
+0.2.8 gave 71 on the same targets, with the first 71 bytes unchanged: zero-pad the
+narrower array before combining `/meta` tables built with different versions.
+
+Side groups:
+
+<!-- audit:table meta_side_groups -->
+| Dataset | Content |
+|---------|---------|
+| `meta_not_found/sdss_id` | Ids that were queried but have no catalog row |
+| `meta_carton_pks/sdss_id` | One row per (sdss_id, carton) pair the database returned... |
+| `meta_carton_pks/carton_pk` | ...and the carton's primary key (cartons `sdss_semaphore` does not know included) |
+
+Attributes of `/meta` (provenance):
+
+<!-- audit:table meta_attrs -->
+| Attribute | Meaning |
+|-----------|---------|
+| `almanac_version` | Package version |
+| `almanac_commit` | Git commit of the almanac checkout (`+dirty` if modified; `UNKNOWN` outside git) |
+| `database_host` | `host:port` from the configuration (no credentials) |
+| `database_name` | `sdss5db` |
+| `input_path` | Absolute path of INPUT |
+| `output_path` | File written (INPUT when in place) |
+| `mode` | `output` or `in_place` |
+| `n_sdss_id` | Rows in `/meta` |
+| `n_solar_system_rows` | Fixed solar-system rows (0 or 1) |
+| `n_sdss_id_input` | Unique positive `sdss_id` in INPUT |
+| `n_sdss_id_requested` | After `--restrict-to` |
+| `n_queried` | Ids queried in this build |
+| `n_copied_from_since` | Rows copied from `--since` |
+| `n_not_found` | Rows of `meta_not_found` |
+| `since_used` | Whether `--since` was given |
+| `since_path` | Its path (empty if not) |
+| `restrict_to` | `--restrict-to` path (empty if not) |
+| `query_start_utc` | When the first batch started |
+| `query_end_utc` | When the last batch ended |
+| `written_utc` | When `/meta` was written |
+| `batch_size` | `--batch-size` |
+| `query_workers` | `--query-workers` (resolved) |
+| `sdss_semaphore_version` | Version of `sdss-semaphore` used to encode `sdss5_target_flags` |
+| `unknown_carton_pks` | Cartons `sdss_semaphore` does not know (int64 array) |
+| `n_unknown_carton_pks` | Their number |
+| `n_carton_pairs` | Rows of `meta_carton_pks` |
+| `n_copied_without_raw_carton_pks` | Rows copied from a `--since` file that had no `meta_carton_pks` |
+| `columns` | Column names in order |
+| `sdss_id_set_sha256` | SHA-256 of the requested `sdss_id` set |
+| `extended` | `True` (only with `--extended`) |
+| `extended_column_groups` | Names of the extended column groups (only with `--extended`) |
+
+## What downstream code reads
+
+ApogeeReduction.jl (`src/ar1D.jl`, `src/utils.jl`) reads, for each night,
+`raw/<obs>/<mjd>/exposures` (as a table; row `i` is exposure `i`) and, for an object
+exposure, `raw/<obs>/<mjd>/fibers/<config_id>` (FPS era) or `fibers/<plate_id>` (plate
+era) using the value in that exposure's row; it relies on the FPS `bonus` stub rows for
+the FPI fibers and on the `category`, `fiber_type`, `fiber_id` and `sdss_id` columns. It
+does not read `sequences`, the night attributes, `/missing_exposures` or `/meta`. Because
+the synthetic fiber-table IDs replace `plate_id`/`config_id`, it opens the edited table of
+an overridden exposure with no change.
+
+## Data Access
+
+```python
+import h5py
+import numpy as np
+
+with h5py.File("survey.h5", "r") as fp:
+    night = fp["raw/apo/60000"]
+    exposures = {k: v[:] for k, v in night["exposures"].items()}
+    i = 13 - 1                                    # exposure 13
+    key = exposures["fiber_map_key"][i].decode()  # str(config_id) or str(plate_id)
+    fibers = {k: v[:] for k, v in night[f"fibers/{key}"].items()}
+    objects = night["sequences/objects"][:]       # (first, last) exposure numbers
+```
+
+The models can also be built directly from raw files:
+
 ```python
 from almanac.data_models import Exposure, FPSTarget, PlateTarget
 
-# Create exposure from file headers
-exposure = Exposure.from_path("/path/to/exposure/file")
+exposure = Exposure.from_path("<apogee_dir>/apo/60000/apR-a-44380013.apz")
+print(exposure.fps, exposure.exposure_string, exposure.flagged_bad)
 
-# Access computed properties
-print(f"FPS era: {exposure.fps}")
-print(f"Exposure string: {exposure.exposure_string}")
-
-# Access targets (automatically loaded)
+# Targets are read from the confSummary / plugmap files on first access
 for target in exposure.targets:
-    if isinstance(target, FPSTarget):
-        print(f"SDSS ID: {target.sdss_id}, Fiber: {target.fiber_id}")
-    elif isinstance(target, PlateTarget):
-        print(f"SDSS ID: {target.sdss_id}, Fiber: {target.fiber_id}")
+    print(target.fiber_id, target.category, target.sdss_id)
 ```
 
 ## Data Quality and Validation
 
 ### Missing Value Handling
 
-- **Numeric fields**: Default to appropriate values (NaN for floats, -1 for IDs)
-- **String fields**: Default to empty strings
-- **Boolean fields**: Default to False
-- **Optional fields**: Can be None
-
-### Type Safety
-
-Pydantic ensures type safety throughout the data pipeline:
-- Automatic type conversion where possible
-- Validation errors for incompatible data
-- Consistent data structures across the application
+- **Numeric fields**: NaN for floats, -1 for identifiers and integer flags
+- **String fields**: empty strings
+- **Boolean fields**: False
 
 ### Quality Assurance
 
-- **Bad exposure flagging**: Each exposure carries a computed `flagged_bad` column, set automatically from the bundled known-bad exposure list (`src/almanac/etc/bad_exposures.csv`) and from missing plate/configuration information on object frames. This automatic property is the supported flagging mechanism; the `almanac flag` CLI subcommand is an unimplemented stub and should not be used.
-- **Fiber mapping corrections**: Historical fixes for known fiber mapping errors
-- **Coordinate validation**: Ensures valid sky coordinates
-- **Identifier consistency**: Validates survey identifiers and relationships
+- **Bad exposure flagging**: each exposure carries the computed `flagged_bad` column (see
+  above). The `almanac flag` subcommand is an unimplemented stub and should not be used.
+- **Exposure overrides**: see [Exposure Overrides](exposure-overrides.md).
+- **Fiber mapping corrections**: historical fixes for known fiber mapping errors.

@@ -1,6 +1,14 @@
 almanac package
 ===============
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   almanac.data_models
+
 Submodules
 ----------
 
@@ -8,6 +16,14 @@ almanac.apogee module
 ---------------------
 
 .. automodule:: almanac.apogee
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+almanac.catalog module
+----------------------
+
+.. automodule:: almanac.catalog
    :members:
    :undoc-members:
    :show-inheritance:
@@ -60,10 +76,58 @@ almanac.logger module
    :undoc-members:
    :show-inheritance:
 
+almanac.metadata module
+-----------------------
+
+.. automodule:: almanac.metadata
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+almanac.overrides module
+------------------------
+
+.. automodule:: almanac.overrides
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+almanac.parallel module
+-----------------------
+
+.. automodule:: almanac.parallel
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+almanac.qa module
+-----------------
+
+.. automodule:: almanac.qa
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+almanac.retry module
+--------------------
+
+.. automodule:: almanac.retry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 almanac.utils module
 --------------------
 
 .. automodule:: almanac.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+almanac.writer module
+---------------------
+
+.. automodule:: almanac.writer
    :members:
    :undoc-members:
    :show-inheritance:

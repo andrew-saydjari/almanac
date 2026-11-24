@@ -20,6 +20,20 @@ Unreleased (fork)
   ``--live-apogee-id-join``. No ``add fibres`` alias. Adapted from upstream sdss/almanac #66.
 * ``io.read_exposures`` (also restores ``original_plate_id``/``original_config_id``),
   ``io.compare_exposures``, ``io.compare_sequences``, ``apogee.prepare_cross_match``.
+* Documentation audit: every page (README, ``docs/``) checked against the code and
+  rewritten where it was outdated or false (configuration path ``~/.almanac/config.yaml``
+  and every configuration key, exit statuses, ``config set`` storing text, the
+  ``dump``/``lookup``/``pgdump``/``pgrestore``/``postprocess``/``flag`` commands as they
+  are, installing the fork rather than the PyPI package, Python 3.11). Documented what was
+  missing: ``add fibers``, the sequences and how they are used, every exposure and fiber
+  column (override columns, ``file_size``), the synthetic fiber-table IDs and what they mean
+  for joins, the night attributes, every ``/meta`` attribute, the override file schema, and
+  what ApogeeReduction.jl reads. ``docs/audit_docs.py`` regenerates the ground truth from the
+  code and checks the documentation against it. API pages for every module.
+* Help and docstring text corrected (no behavior change): ``--fibers``, ``-v``,
+  ``--live-apogee-id-join`` (the lookup relation is a table), ``flag`` and ``dump visits``
+  (not implemented), ``dump stars``, ``pgrestore`` (base tables only), and where overrides
+  are applied (``apogee.process_night``).
 
 0.5.3
 -----

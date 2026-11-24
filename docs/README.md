@@ -1,59 +1,33 @@
 # almanac Documentation
 
-This directory contains comprehensive documentation for the `almanac` project.
+This directory holds the documentation of the `andrew-saydjari/almanac` fork (Sphinx,
+with Markdown pages through MyST).
 
 ## Documentation Structure
 
-- **[Installation Guide](installation.md)** - Complete installation instructions for all environments
-- **[User Guide](user-guide.md)** - Comprehensive user guide and tutorials
-- **[API Reference](api-reference.md)** - Complete API documentation for all modules
-- **[Configuration Guide](configuration.md)** - Configuration options and settings
-- **[Data Formats](data-formats.md)** - HDF5 output formats and data structures
-- **[Development Guide](development.md)** - Development setup, contributing guidelines, and testing
-- **[CLI Reference](cli-reference.md)** - Complete command-line interface documentation
-- **[Examples](examples/)** - Usage examples and tutorials
-- **[FAQ](faq.md)** - Frequently asked questions and troubleshooting
-
-## Quick Links
-
-- [Getting Started](../README.md#getting-started)
-- [Project Repository](https://github.com/sdss/almanac)
-- [Issue Tracker](https://github.com/sdss/almanac/issues)
+- **[Installation Guide](installation.md)**: installing the fork
+- **[User Guide](user-guide.md)**: how to build and use almanac files
+- **[CLI Reference](cli-reference.md)**: every command and option
+- **[Configuration Guide](configuration.md)**: every setting
+- **[Data Formats](data-formats.md)**: every HDF5 group, dataset and attribute, and what
+  downstream code reads
+- **[Exposure Overrides](exposure-overrides.md)**: the override and hand-placed targets
+  files
+- **[FAQ](faq.md)**: questions and troubleshooting
+- **[API Reference](api-reference.md)**: the main Python entry points
+- **[Development Guide](development.md)**: tests, CI, the documentation build and audit
 
 ## Building Documentation
 
-### Online Documentation
-
-The documentation is automatically built and hosted on **ReadTheDocs.org**:
-- **Latest Docs**: https://sdss-almanac.readthedocs.io/
-- **PDF Version**: Available on ReadTheDocs
-- **ePub Version**: Available on ReadTheDocs
-
-### Local Building
-
-Documentation can be built locally using Sphinx:
-
 ```bash
-# Install documentation dependencies
-pip install -e ".[docs]"
-pip install -r docs/requirements.txt
-
-# Build HTML documentation
+uv sync --frozen --extra dev --extra docs
 cd docs
-make html
-
-# Build and serve locally at http://localhost:8000
-make serve
-
-# Live rebuilding with auto-refresh
-make livehtml
+uv run sphinx-build -b html . _build/html -W --keep-going   # what CI runs
+make html                                                    # the same build through the Makefile (warnings not fatal)
+make livehtml                                                # live rebuild (needs sphinx-autobuild)
 ```
 
-### ReadTheDocs Integration
-
-The project uses:
-- **`.readthedocs.yaml`**: Configuration for ReadTheDocs.org builds
-- **GitHub Actions**: Automated documentation building and deployment
-- **Sphinx**: Documentation generation from both Markdown and RST sources
-
-See [`setup_rtd.md`](setup_rtd.md) for complete ReadTheDocs setup instructions.
+`docs/requirements.txt` lists the build requirements for ReadTheDocs
+(`.readthedocs.yaml`). `audit_docs.py` checks the pages against the code (see the
+[Development Guide](development.md#documentation-audit)); `test_docs.py` is an older
+build smoke test.

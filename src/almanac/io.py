@@ -95,9 +95,11 @@ def write_fibers(fp, observatory, mjd, exposures, verbose: bool = False):
     plate ID, so its own table). Existing groups for the same key are
     replaced.
 
-    Only the first exposure of each key is consulted, and only exposures
-    whose `targets` have been populated (see
-    `almanac.apogee.cross_match_targets`) are written.
+    Only the first exposure of each key with a non-empty target list is
+    written. `targets` is read from the confSummary / plugmap files on first
+    access; `almanac.apogee.cross_match_targets` reads (and cross-matches)
+    it first for the exposures that are written. Calibration exposures have
+    no targets.
     """
     _print = print if verbose else lambda *args, **kwargs: None
 

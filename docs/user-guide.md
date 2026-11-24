@@ -1,247 +1,198 @@
 # User Guide
 
-This comprehensive guide covers all aspects of using `almanac` to query and analyze APOGEE observational data.
+How to use `almanac` to build the summary of APOGEE observations that the reduction
+pipeline reads. The [CLI Reference](cli-reference.md) lists every option.
 
 ## Overview
 
-`almanac` scrapes headers from raw APOGEE image files and cross-matches them against the SDSS database to provide comprehensive summaries of observational data. It supports both SDSS-IV (plate-based) and SDSS-V (fiber positioner-based) observations.
+For each observatory and night, `almanac`:
+
+1. reads the headers of the raw APOGEE files (one row per exposure number; numbers with
+   no file become `image_type = "missing"` rows) and asks the operations database which
+   exposures it knows, to report missing ones;
+2. applies the [exposure overrides](exposure-overrides.md);
+3. builds the exposure **sequences**: runs of object exposures on the same
+   field/plate/configuration (the visits), runs of arc lamp exposures, and runs of
+   missing exposures;
+4. with `--fibers`, reads the fiber-to-target mapping of each plate (SDSS-IV) or FPS
+   configuration (SDSS-V) observed, and cross-matches the targets of the first exposure of
+   each object sequence to an `sdss_id`.
+
+It supports both the plate era and the robotic Fiber Positioning System (FPS) era (from
+MJD 59423 at APO, 59809 at LCO).
 
 ## Basic Usage
 
-### Default Behavior
-
-Run `almanac` without arguments to see today's observations from both observatories:
-
 ```bash
-almanac
+almanac             # the current night, both observatories
+almanac --apo       # Apache Point Observatory only
+almanac --lco       # Las Campanas Observatory only
 ```
 
-### Observatory Selection
-
-Query specific observatories:
+## Selecting nights
 
 ```bash
-almanac --apo    # Apache Point Observatory only
-almanac --lco    # Las Campanas Observatory only
+almanac --mjd 59300                                     # one night
+almanac --mjd -1                                        # last night
+almanac --date 2021-01-01                               # one night, by date
+almanac --mjd-start 59300 --mjd-end 59310               # 11 nights, inclusive
+almanac --mjd-start -30                                 # the last 30 nights to today
+almanac --date-start 2021-01-01 --date-end 2021-12-31   # all of 2021
+almanac --mjds 58011,59337,60000                        # just these three nights
 ```
 
-## Date and Time Queries
+Only one way of selecting nights may be given per run. Negative MJDs count back from the
+current MJD, which advances at 12:00 UTC.
 
-### Single Date Queries
-
-**Using MJD (Modified Julian Date)**:
-```bash
-almanac --mjd 59300        # Specific MJD
-almanac --mjd -1           # Yesterday
-almanac --mjd -7           # One week ago
-```
-
-**Using Calendar Dates** (UTC):
-```bash
-almanac --date 2021-01-01  # Specific date
-almanac --date 2024-12-25  # Christmas Day 2024
-```
-
-### Date Range Queries
-
-**MJD Ranges**:
-```bash
-almanac --mjd-start 59300 --mjd-end 59310    # 10-day range
-almanac --mjd-start -30                       # Last 30 days
-```
-
-**Calendar Date Ranges**:
-```bash
-almanac --date-start 2021-01-01 --date-end 2021-01-31  # January 2021
-almanac --date-start 2021-01-01 --date-end 2021-12-31  # All of 2021
-```
-
-**Explicit MJD Lists** (need not be contiguous):
-```bash
-almanac --mjds 58011,59337,60000    # Just these three nights
-```
-
-## Fiber Mapping Analysis
-
-### Basic Fiber Information
-
-Include fiber-to-target mappings:
+## Fiber mappings and the cross-match
 
 ```bash
-almanac --mjd 60000 --fibers    # or --fibres
+almanac --mjd 60000 --fibers
 ```
 
-This provides:
-- Target assignments to fibers
-- Target properties and coordinates
-- SDSS identifiers (cross-matched)
+This adds, per night, one fiber table per plate or configuration with the target
+assignments, coordinates and catalog identifiers of every fiber, and the `sdss_id` of
+each target. Keep the cross-match on (it is on unless `--no-x-match` is given); the
+pipeline needs the `sdss_id`.
 
-### Cross-matching Control
-
-Skip database cross-matching for faster results:
-
-```bash
-almanac --mjd 60000 --fibers --no-x-match
-```
+FPS fibers whose positioner was assigned a target but did not reach it are relabeled
+`offtarget` and get no `sdss_id` (see [Data Formats](data-formats.md#off-target-fibers)).
+Fibers that an exposure override says saw a hand-placed star or Vesta are rewritten
+before the cross-match (see [Exposure Overrides](exposure-overrides.md)).
 
 ## Output and Verbosity
 
-### Verbosity Levels
-
-Control output detail:
-
 ```bash
-almanac                    # Minimal output
-almanac -v                 # Show progress display
-almanac -vv                # Show progress + exposure metadata
+almanac                    # log messages only
+almanac -v                 # live progress display
+almanac -vv                # progress display, then every night's exposure table
 ```
 
-### Output Files
-
-Save results to structured HDF5 files:
-
 ```bash
-almanac --output results.h5 --mjd-start -7  # Last week to HDF5
+almanac --output results.h5 --mjd-start -7                       # last week to HDF5
 almanac -O monthly.h5 --date-start 2024-01-01 --date-end 2024-01-31
 ```
 
-**Incremental Updates**: Running `almanac` multiple times with the same output file appends new data while preserving existing entries.
+Running `almanac` again with the same output file replaces the nights processed and keeps
+the others. See [Data Formats](data-formats.md) for the layout.
 
-### Resuming Long Runs
-
-For large queries, add `--skip-existing` so that observatory/MJD pairs already present in the output file are skipped:
+### Resuming long runs
 
 ```bash
 almanac --mjd-start 59300 --mjd-end 60300 --fibers \
         --output survey.h5 --skip-existing
 ```
 
-If the run is interrupted or some nights fail, simply re-run the same command: only the missing pairs are processed. Transient database errors are retried automatically with backoff, and a night that fails outright is recorded and skipped rather than aborting the run (failed pairs are listed at the end). See the [Configuration Guide](configuration.md) for the retry knobs.
+With `--skip-existing`, nights already in the output file are skipped, so if the run is
+interrupted or some nights fail, re-run the same command. Transient database errors are
+retried with backoff, and a night that fails is logged and skipped (the failed nights are
+listed at the end; the exit status is still 0). See the
+[Configuration Guide](configuration.md) for the retry settings.
 
-### Missing-Exposure Reporting
+### Missing-exposure reporting
 
-Every detected missing exposure is recorded in a run-level `/missing_exposures` table in the output file, with a reason code distinguishing gaps on disk, database/disk mismatches, and database outages. Review this table before downstream processing; see [Data Formats](data-formats.md) for the schema and reason codes.
+Every detected missing exposure is recorded in the run-level `/missing_exposures` table of
+the output file, with a reason code distinguishing gaps on disk, database/disk
+mismatches, and database outages. Review it before downstream processing; see
+[Data Formats](data-formats.md#missing-exposures-report).
 
-## Adding Fiber Mappings Later
-
-`almanac add fibers survey.h5 --output survey_fibers.h5` adds fiber mappings to a file built without `--fibers`, running the same code as `almanac --fibers` on the stored exposures (overrides and hand-placed targets included). Use `--in-place` to modify the input. Nights whose stored exposures would change under the current override list are refused; rebuild them with `almanac`.
-
-## Adding Catalog Metadata
-
-Once you have an output file with fiber mappings, `almanac add metadata` decorates it with a `meta/` group containing astrometry, photometry, and targeting flags for every cross-matched target (queried once per unique `sdss_id`):
+## Adding fiber mappings later
 
 ```bash
-almanac add metadata survey.h5
-almanac add metadata survey.h5 --query-workers 4   # be gentle on remote tunnels
+almanac add fibers survey.h5 --output survey_fibers.h5
 ```
 
-By default all MJDs in the file are processed; restrict with `--mjd`, `--mjds`, `--mjd-start`/`--mjd-end`, or `--apo`/`--lco`. If the file has no fiber mappings for the selected nights, the command exits with status 1 without writing anything: build the file with `--fibers` first.
+adds fiber mappings to a file built without `--fibers`, running the same code as
+`almanac --fibers` on the stored exposures (overrides and hand-placed targets included).
+Use `--in-place` to modify the input instead. Nights whose stored exposures or sequences
+would change under the current override list are refused; rebuild them with `almanac`.
 
-> **Run `add metadata` database-local.** Throughput is dominated by database locality and cache state: a full-survey pass (~4.7M unique `sdss_id`s) ran at ~660 ids/s cold (~2h15m) even with the database on the local network, versus 13--26k ids/s on small warm slices. Through an SSH tunnel the same pass is impractically slow. Run it at Utah (or wherever is network-local to the SDSS database), and budget RAM for the held result set (~18 GB for ~4.7M sources).
+## Adding catalog metadata
 
-## Advanced Features
+Once you have a file with fiber mappings, `almanac add metadata` builds a `meta` group
+with astrometry, photometry and targeting flags for every cross-matched target (queried
+once per unique `sdss_id`). Never write the file a pipeline is reading: decorate a copy or
+write a targets file.
 
-### Data Access
-
-The CLI provides access to all available data columns automatically. Column selection and filtering are handled through the package's data model, providing a complete view of survey operations.
-
-### Performance Tuning
-
-**Parallel Processing**:
 ```bash
-almanac                    # default: the CPU budget (SLURM_CPUS_ON_NODE in a Slurm job)
-almanac --processes 4      # Use 4 worker processes
-almanac -p 8 --query-workers 2   # 8 workers, at most 2 holding a database connection
+almanac add metadata survey.h5 --output survey_targets.h5
+almanac add metadata survey.h5 --output survey_targets.h5 --query-workers 2   # gentler on the database
+almanac add metadata new.h5 --output new_targets.h5 --since survey_targets.h5  # only new sdss_id
 ```
 
-## Data Structure Examples
+By default all nights in the file are used; restrict with `--mjd`, `--mjds`,
+`--mjd-start`/`--mjd-end`, the date options, or `--apo`/`--lco`. If the file has no fiber
+mappings for the selected nights, the command exits with status 1 without writing
+anything. An interrupted build is resumed by re-running the same command.
 
-### Exposure Data
+> **Run `add metadata` database-local.** Throughput is dominated by database locality and
+> cache state: a full-survey pass (about 4.7 million unique `sdss_id`) ran at about
+> 660 ids/s cold (about 2 h 15 min) even with the database on the local network, against
+> 13,000 to 26,000 ids/s on small warm slices. Through an SSH tunnel the same pass is
+> impractically slow. Run it at Utah (or wherever is network-local to the SDSS database),
+> and budget memory for the final assembly, when the finished batches are read back.
 
-Typical exposure information includes:
-- **Basic**: Observatory, MJD, exposure number, type
-- **Configuration**: Design ID, field ID, cart ID, config ID
-- **Instrumentation**: Number of reads, lamp states, dither pixels
-- **Conditions**: Seeing, focus, comments
+## Parallelism
 
-### Fiber Mapping Data
+```bash
+almanac --mjd-start -30 -O month.h5                 # default: the CPU budget
+almanac --processes 4 --mjd-start -30 -O month.h5   # 4 worker processes
+almanac -p 8 --query-workers 2 --mjd-start -30      # 8 workers, at most 2 holding a database connection
+```
 
-**FPS (SDSS-V) Data**:
-- SDSS identifier and catalog ID
-- Program and carton information
-- Target coordinates (RA, Dec)
-- Fiber assignments
+Each worker processes one observatory/MJD pair; there are never more workers than pairs.
+Without `--processes`, almanac uses `SLURM_CPUS_ON_NODE` inside a Slurm job, else the CPUs
+the process may run on. On a shared login node, pass a small `--processes` explicitly.
 
-**Plate (SDSS-IV) Data**:
-- Target identifiers and coordinates
-- Target and source types
-- Fiber assignments
+## Exposure data
+
+Each exposures table includes:
+- **Basic**: observatory, MJD, exposure number, image type, file size
+- **Identifiers**: plate, cartridge, field, design and configuration IDs
+- **Instrument**: number of reads, lamp states, dither position, focus
+- **Conditions**: seeing, observer comment
+- **Flags and provenance**: `flagged_bad`, `chip_flags`, exposure override columns
+
+## Fiber mapping data
+
+**FPS (SDSS-V)**: `sdss_id`, `catalogid`, 2MASS designation, program, carton and
+cadence, category, positioner, coordinates, and status flags (`assigned`, `on_target`,
+`disabled`, `valid`, `decollided`).
+
+**Plate (SDSS-IV)**: `sdss_id`, `catalogid`, 2MASS ID, target and object types,
+coordinates, and plate-specific fields.
 
 ## Common Workflows
 
-### Daily Operations Check
+### Daily check
 
 ```bash
-# Check today's observations with details
-almanac -vv
-
-# Check specific observatory
+almanac -vv            # the current night, with details
 almanac --apo -vv
 ```
 
-### Survey Planning and Review
+### Building a release file
 
 ```bash
-# Review recent survey progress
-almanac --mjd-start -30 --fibers -O recent_survey.h5
-
-# Analyze specific survey period
-almanac --date-start 2024-01-01 --date-end 2024-03-31 --fibers
+almanac --mjd-start 57618 --mjd-end 61000 --fibers -O allnights.h5 --skip-existing -v
+almanac add metadata allnights.h5 --output allnights_targets.h5
 ```
 
-### Data Quality Assessment
+### Comparing with and without the overrides
 
 ```bash
-# Check recent exposures with full output
-almanac --mjd-start -7 -vv
-
-# Focus on yesterday's data
-almanac --mjd-start -1 -v
+almanac --mjd 55755 --apo --fibers -O with.h5
+almanac --mjd 55755 --apo --fibers --no-overrides -O without.h5
 ```
 
-### Export for Analysis
+## Tips
 
-```bash
-# Create comprehensive dataset for analysis
-almanac --date-start 2024-01-01 --date-end 2024-12-31 \\
-        --fibers --output 2024_survey.h5 -v
-
-# Quick daily summary
-almanac --mjd -1 --output daily_$(date +%Y%m%d).h5
-```
-
-## Tips and Best Practices
-
-### Performance
-
-- Use `--no-x-match` when cross-matching isn't needed
-- Adjust `--processes` based on available CPU cores
-- For large date ranges, consider breaking into smaller chunks
-
-### Data Management
-
-- Use descriptive output filenames with dates
-- Leverage incremental updates for ongoing monitoring
-- Regularly backup important datasets
-
-### Troubleshooting
-
-- Use `-vv` for detailed progress information
-- Check database connectivity with `almanac config show`
-- Verify data paths and permissions
+- Use `-vv` and `almanac config set logging_level 10` for maximum detail.
+- `almanac config show` prints the configuration path and database settings.
+- Keep one output file per purpose and let `--skip-existing` resume it.
 
 ## Next Steps
 
-- See [Configuration Guide](configuration.md) for customization options
-- Check [CLI Reference](cli-reference.md) for complete command documentation
-- Visit [API Reference](api-reference.md) for programmatic usage
+- [Configuration Guide](configuration.md) for the settings
+- [CLI Reference](cli-reference.md) for every command and option
+- [Data Formats](data-formats.md) for the file layout and downstream readers

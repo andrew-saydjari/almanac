@@ -1,281 +1,170 @@
 # API Reference
 
-This document provides complete API reference for all `almanac` modules.
+The modules most useful from Python, with their main entry points. The full,
+automatically generated reference (every function and its docstring) is under
+[API Documentation](api/modules.rst). The HDF5 layout is described in
+[Data Formats](data-formats.md).
 
 ## Module Structure
 
 ```
 almanac/
-├── __init__.py          # Version information
-├── cli.py              # Command-line interface
-├── config.py           # Configuration management
-├── database.py         # Database connectivity
-├── apogee.py           # APOGEE data processing
-├── io.py               # HDF5 I/O operations
-├── display.py          # Output formatting and display
-├── logger.py           # Logging configuration
-└── utils.py            # Utility functions
+├── __init__.py          # __version__, config, logger
+├── cli.py               # the `almanac` command and its subcommands (click)
+├── config.py            # configuration dataclasses and ~/.almanac/config.yaml
+├── database.py          # sdssdb connection (connects on import)
+├── retry.py             # retry_on_database_error
+├── parallel.py          # --processes / --query-workers resolution
+├── apogee.py            # the per-night pipeline and the cross-match
+├── overrides.py         # exposure overrides and hand-placed targets
+├── io.py                # HDF5 writers and readers
+├── writer.py            # background HDF5 writer thread
+├── metadata.py          # `almanac add metadata`
+├── catalog.py           # catalog queries behind /meta
+├── qa.py                # known-bad exposure list
+├── display.py           # rich display
+├── logger.py, utils.py
+├── data_models/         # Exposure, FPSTarget, PlateTarget, Source, ExtendedSource, types
+└── postprocess/         # helpers of `almanac postprocess`
 ```
 
 ## almanac.config
 
-Configuration management for almanac settings.
-
-### Classes
-
-#### `DatabaseConfig`
-```python
-@dataclass
-class DatabaseConfig:
-    user: str = "sdss_user"
-    host: str = "operations.sdss.org" 
-    port: int = 5432
-    domain: str = "operations.sdss.*"
-```
-
-Database connection configuration.
-
-#### `ObservatoryMJD` 
-```python
-@dataclass
-class ObservatoryMJD:
-    apo: int = 59_558  # Apache Point Observatory
-    lco: int = 59_558  # Las Campanas Observatory
-```
-
-Minimum MJD values for each observatory.
-
-#### `Config`
-```python
-@dataclass
-class Config:
-    sdssdb: DatabaseConfig = field(default_factory=DatabaseConfig)
-    database_connect_time_warning: int = 3  # seconds
-    sdssdb_exposure_min_mjd: ObservatoryMJD = field(default_factory=ObservatoryMJD)
-    logging_level: int = 20  # logging.INFO
-```
-
-Main configuration class containing all settings.
-
-### Functions
-
-#### `load_config_file(config_path: Optional[str] = None) -> dict`
-Load configuration from YAML file.
-
-**Parameters:**
-- `config_path`: Path to config file (optional, uses default if None)
-
-**Returns:** Dictionary of configuration values
-
-#### `get_config_path() -> Path`
-Get the default configuration file path.
-
-**Returns:** Path object to config file location
+- `Config`, `DatabaseConfig`, `ObservatoryMJD`: dataclasses with the defaults of every
+  setting ([Configuration](configuration.md)).
+- `config`: the settings loaded at import from `~/.almanac/config.yaml` (created with the
+  defaults if absent); also `almanac.config`.
+- `get_config_path() -> Path`: `~/.almanac/config.yaml` (creates `~/.almanac`).
+- `ConfigManager.save(config, path)`, `ConfigManager.load(Config, path)`: write / read a
+  configuration file (unknown keys are ignored, missing keys take their defaults).
 
 ## almanac.database
 
-Database connectivity and SDSS database integration.
-
-### Module Variables
-
-#### `is_database_available: bool`
-Whether database connection was successfully established.
-
-### Imported Database Models
-
-The module imports and exposes database models from `sdssdb`:
-- `catalogdb`: Catalog database models
-- `opsdb`: Operations database models
+Importing it connects to the database with the `sdssdb` settings and exposes
+`is_database_available` (bool), `database`, and the `catalogdb`, `opsdb` and `targetdb`
+model modules of `sdssdb.peewee.sdss5db`. Worker processes import it lazily so that each
+opens its own connection.
 
 ## almanac.apogee
 
-Core APOGEE data processing functionality.
+### `get_almanac_data(observatory, mjd, fibers=False, meta=False, only_assign_sdss_id_to_first_exposure_per_configuration=True, overrides=True)`
+Everything `almanac` computes for one night: reads the exposures from the raw headers
+(`get_exposures_and_missing`) and runs `process_night`. `meta` turns the cross-match on
+(only with `fibers`). Returns `(observatory, mjd, exposures, sequences, missing)`:
+the `Exposure` list (exposure `i` at index `i - 1`), `{"objects": [...], "arclamps":
+[...], "missing": [...]}` of (first, last) pairs, and the missing-exposure records.
 
-### Constants
+### `process_night(observatory, mjd, exposures, missing=(), fibers=False, meta=False, only_assign_sdss_id_to_first_exposure_per_configuration=True, overrides=True)`
+The one per-night pipeline after the exposures are read: exposure overrides, sequences,
+and with `fibers` the fiber overrides and `cross_match_targets`. `get_almanac_data` calls
+it with exposures from the raw headers; `almanac add fibers` with exposures read back from
+a file and rewound by `almanac.overrides.rewind_exposure_overrides`.
 
-#### `RAW_HEADER_KEYS`
-```python
-RAW_HEADER_KEYS = (
-    "DATE-OBS", "FIELDID", "DESIGNID", "CONFIGID", "SEEING",
-    "EXPTYPE", "NREAD", "IMAGETYP", "LAMPQRTZ", "LAMPTHAR", 
-    "LAMPUNE", "FOCUS", "NAME", "PLATEID", "CARTID", "MAPID",
-    "PLATETYP", "OBSCMT", "COLLPIST", "COLPITCH", "DITHPIX",
-    "TCAMMID", "TLSDETB"
-)
-```
+### `get_exposures_and_missing(observatory, mjd)`
+The night's exposures (gaps filled with `image_type = "missing"`) and the
+missing-exposure records (`classify_missing_exposures`; reasons in
+`MISSING_EXPOSURE_REASONS`).
 
-FITS header keys extracted from raw APOGEE files.
+### `get_science_sequences(exposures)`, `get_arclamp_sequences(exposures)`, `get_sequences(exposures, image_type, fields, ignore_interrupting_darks=False)`
+The sequence definitions ([Data Formats](data-formats.md#sequences)).
 
-### Functions
+### `cross_match_targets(exposures, science_sequences, xmatch=True, only_assign_sdss_id_to_first_exposure_per_configuration=True, include_first_exposure_per_fiber_map_key=False)`
+Loads the fiber targets of the first exposure of each object sequence (and, with
+`include_first_exposure_per_fiber_map_key`, of the first object exposure of every fiber
+table) and, if `xmatch`, sets each target's `sdss_id` in place. Uses the targeted lookups
+(`catalogid_sdss_id_lookup`, `gaia_dr2_sdss_id_lookup`, `get_apogee_id_lookup`,
+`twomass_sdss_id_lookup`), keeps the best-ranked row and breaks ties to the smallest
+`sdss_id` (`best_ranked_lookup`). Unplugged and off-target fibers keep `sdss_id = -1`;
+solar-system bodies placed by an override keep the `sdss_id` set there.
 
-#### `_parse_hexdump_headers(output: List[str], keys: Tuple[str, ...], default: str = "") -> List[str]`
-Parse hexdump output to extract header key-value pairs.
+### `prepare_cross_match(xmatch, live_apogee_id_join=False, full_apogee_id_lookup=False)`
+Once-per-run cross-match setup shared by `almanac --fibers` and `almanac add fibers`:
+resolves the APOGEE ID lookup source (`resolve_apogee_id_source`) and, if asked, builds
+the full lookup (`create_apogee_id_lookup`). Returns `(source, lookup_attrs,
+full_lookup)`; `lookup_attrs` are the `apogee_id_lookup_*` night attributes
+(`apogee_id_source_attrs`).
 
-**Parameters:**
-- `output`: List of strings from hexdump output
-- `keys`: Tuple of header keys to look for
-- `default`: Default value when key not found
+## almanac.overrides
 
-**Returns:** List of extracted values
-
-#### `cross_match_targets(exposures, science_sequences, xmatch=True, only_assign_sdss_id_to_first_exposure_per_configuration=True)`
-Load the fiber-to-target mapping for the first exposure of each science sequence and, if `xmatch`, assign each target an `sdss_id` in place. Uses the targeted lookups (APOGEE IDs per night through the maintainers' table unless a full lookup is installed; catalogid, Gaia DR2 and 2MASS helpers), keeps the best-ranked row and breaks ties to the smallest `sdss_id`. Unplugged and off-target fibers keep `sdss_id = -1`. `get_almanac_data(..., fibers=True)` calls it after applying the fiber overrides (with `include_first_exposure_per_fiber_map_key=True` on override nights, so the per-exposure tables are cross-matched too). Solar-system bodies placed by an override keep the `sdss_id` set there.
-
-#### `process_night(observatory, mjd, exposures, missing=(), fibers=False, meta=False, only_assign_sdss_id_to_first_exposure_per_configuration=True, overrides=True)`
-The one per-night pipeline after the exposures are read: exposure overrides, sequences, and with `fibers` the fiber overrides and `cross_match_targets`. `get_almanac_data` calls it with exposures from the raw headers; `almanac add fibers` with exposures read back from a file and rewound by `almanac.overrides.rewind_exposure_overrides`.
-
-#### `prepare_cross_match(xmatch, live_apogee_id_join=False, full_apogee_id_lookup=False)`
-Once-per-run cross-match setup shared by `almanac --fibers` and `almanac add fibers`: resolves the APOGEE ID lookup source, returns `(source, lookup_attrs, full_lookup)`.
+- `load_overrides()`, `load_handplaced_targets()`: parse and validate the packaged files
+  (cached); `parse_overrides(text)`, `parse_handplaced_targets(text)` for other text.
+- `overrides_for(observatory, mjd)`: the entries of one night.
+- `apply_exposure_overrides(exposures, entries)`, `apply_fiber_overrides(exposures,
+  entries, targets=None)`: apply them in place (called by `process_night`).
+- `rewind_exposure_overrides(exposures)`: return exposures read from a file to their
+  header values.
+- `override_table_id(mjd, k)`, `is_override_table_id(value)`: the synthetic fiber-table
+  IDs (`OVERRIDE_TABLE_ID_BASE = 1_000_000_000`).
+- `overrides_attrs(enabled)`: the `exposure_overrides*` and `handplaced_targets_sha256`
+  night attributes.
+- `OverrideError`.
 
 ## almanac.io
 
-HDF5 input/output operations for structured data storage.
+### `update(fp, observatory, mjd, exposures, sequences, fibers=False, verbose=False, compression=True)`
+Write one night to an open HDF5 file: replaces `raw/<obs>/<mjd>/exposures` and
+`sequences`, and with `fibers` calls `write_fibers`. `write_almanac(output, results, ...)`
+writes a list of `get_almanac_data` results to a file.
 
-### Functions
+### `write_fibers(fp, observatory, mjd, exposures, verbose=False)`
+Write `raw/<obs>/<mjd>/fibers/<key>`, one group per `Exposure.fiber_map_key`, from the
+first object exposure of each key that has targets; existing groups with the same key are
+replaced.
 
-#### `get_or_create_group(fp, group_name)`
-Get existing HDF5 group or create if it doesn't exist.
-
-**Parameters:**
-- `fp`: HDF5 file pointer
-- `group_name`: Name of the group
-
-**Returns:** HDF5 group object
-
-#### `delete_hdf5_entry(fp, group_name)`
-Delete HDF5 group/entry if it exists.
-
-**Parameters:**
-- `fp`: HDF5 file pointer  
-- `group_name`: Name of entry to delete
-
-#### `read_exposures(fp, observatory, mjd)`
-Reconstruct the `Exposure` models for one night from `raw/{observatory}/{mjd}/exposures` (restoring `original_plate_id`/`original_config_id`), without the raw headers. Empty list if the group is missing.
-
-#### `compare_exposures(group, exposures)` / `compare_sequences(fp, observatory, mjd, sequences)`
-Differences between a stored exposures group (or sequences) and what writing the given models (sequences) would store; empty if identical. Used by `almanac add fibers` to refuse nights.
-
-#### `write_night_attrs(fp, observatory, mjd, override_attrs=None, lookup_attrs=None, clear_stale_lookup_attrs=False)`
+### `write_night_attrs(fp, observatory, mjd, override_attrs=None, lookup_attrs=None, clear_stale_lookup_attrs=False)`
 The per-night attributes written by both `almanac` and `almanac add fibers`.
 
-#### `write_fibers(fp, observatory, mjd, exposures, verbose=False)`
-Write the fiber-to-target mappings for one night to `raw/{observatory}/{mjd}/fibers/{key}`, one group per configuration (or plate); the key is `Exposure.fiber_map_key` (the configuration or plate ID; an exposure override that edits fibers gives its exposure a synthetic ID, so its own table). Only exposures whose `targets` have been populated (see `almanac.apogee.cross_match_targets`) are written; existing groups for the same configuration are replaced.
+### `read_exposures(fp, observatory, mjd)`
+Rebuild the `Exposure` models of one night from `raw/<obs>/<mjd>/exposures` (restoring
+`original_plate_id`/`original_config_id`), without the raw headers. Empty list if the group
+is missing.
 
-#### `_update_almanac(fp, exposures, sequence_indices, fiber_maps, compression=True, verbose=False)`
-Update HDF5 file with almanac data.
+### `compare_exposures(group, exposures)`, `compare_sequences(fp, observatory, mjd, sequences)`
+Differences between a stored exposures group (or sequences) and what writing the given
+models (sequences) would store; empty if identical. Used by `almanac add fibers` to refuse
+nights.
 
-**Parameters:**
-- `fp`: HDF5 file pointer
-- `exposures`: Exposure data table
-- `sequence_indices`: Sequence index arrays
-- `fiber_maps`: Fiber mapping data
-- `compression`: Enable HDF5 compression
-- `verbose`: Enable verbose output
+### `read_missing_exposures(fp)`, `write_missing_exposures(fp, rows, replace_keys=None)`
+The run-level `/missing_exposures` table. With `replace_keys` (a set of (observatory, mjd)),
+entries of other nights are kept.
+
+### `get_or_create_group(fp, group_name)`, `delete_hdf5_entry(fp, group_name)`, `write_models_to_hdf5_group(models, group, ...)`
+Helpers.
+
+## almanac.metadata
+
+### `build_metadata(input_path, output_path=None, since=None, restrict_to=None, observatories=("apo", "lco"), mjds=None, query_workers=1, batch_size=10000, checkpoint_dir=None, fresh=False, keep_checkpoint=False, retry_not_found=False, max_batch_attempts=8, retry_backoff=60.0, retry_max_delay=1800.0, query_batch=None, ids=None, extended=False)`
+What `almanac add metadata` runs. Returns the provenance attributes written on `/meta`.
+`query_batch` replaces the catalog query (tests); `ids` replaces the `sdss_id` collected
+from the input. Raises `MetadataBuildError` when the build cannot continue (for example no
+fiber mappings, or a checkpoint from another build).
+
+## almanac.parallel
+
+- `cpu_budget()`: `(n_cpus, source)` from `SLURM_CPUS_ON_NODE`, the CPU affinity, or
+  `os.cpu_count()`.
+- `resolve_processes(explicit=None, n_tasks=None)`, `resolve_query_workers(explicit=None,
+  config=None, allow_zero=False)`: the `--processes` / `--query-workers` rules, returning
+  `(value, source)`.
+
+## almanac.retry
+
+`retry_on_database_error`: decorator (bare or with `attempts`, `backoff`, `max_delay`)
+that retries transient database connection errors with reconnect and exponential backoff
+(`database_retry_attempts`, `database_retry_backoff`).
+
+## almanac.data_models
+
+- `Exposure`: one exposure. `Exposure.from_path(path)` and `Exposure.from_keys(mjd,
+  observatory, exposure, prefix=None, chip=None)` read the raw headers; `targets` reads the
+  fiber targets from the `confSummary` or plugmap files on first access.
+- `FPSTarget`, `PlateTarget`: fiber rows ([Data Formats](data-formats.md)).
+- `source.Source`, `source.ExtendedSource`: `/meta` rows.
+- `types`: the `Literal` types (`Category`, `ImageType`, ...) and
+  `IDENTIFIED_STAR_CATEGORIES`, `assigns_sdss_id`, `asserts_target_identity`.
 
 ## almanac.cli
 
-Command-line interface implementation using Click.
-
-### Main Command
-
-#### `@click.group(invoke_without_command=True)`
-Main CLI entry point with comprehensive options for querying APOGEE data.
-
-**Key Options:**
-- `--mjd`: Single MJD query (supports negative relative values)
-- `--mjd-start/--mjd-end`: MJD range queries  
-- `--date/--date-start/--date-end`: Calendar date queries
-- `--apo/--lco`: Observatory selection
-- `--fibers/--fibres`: Include fiber mappings
-- `--no-x-match`: Skip cross-matching
-- `--output/-O`: Output file path
-- `--processes/-p`: Parallel processing
-- `--verbosity/-v`: Verbosity level (stackable)
-
-
-### Configuration Subcommands
-
-#### `config show`
-Display current configuration settings.
-
-#### `config get <key>`
-Get specific configuration value.
-
-#### `config set <key> <value>`
-Set configuration value.
-
-## almanac.display
-
-Output formatting and display utilities.
-
-*Note: Specific functions require code examination for detailed documentation.*
-
-## almanac.logger
-
-Logging configuration and setup.
-
-*Note: Specific functions require code examination for detailed documentation.*
-
-## almanac.utils
-
-General utility functions.
-
-*Note: Ensures Yanny table reader/writer registration for astropy.*
-
-## Data Types and Structures
-
-### HDF5 Output Structure
-
-```
-observatory/mjd/
-├── exposures           # Exposure metadata table
-├── sequences          # Nx2 array of exposure ranges forming sequences  
-└── fibers/
-    ├── fps/configid    # FPS fiber mappings by config ID
-    └── plates/plateid  # Plate fiber mappings by plate ID
-```
-
-### Exposure Table Columns
-
-Common exposure metadata columns:
-- `observatory`: "apo" or "lco" 
-- `mjd`: Modified Julian Date
-- `exposure`: Exposure number
-- `exptype`: Exposure type
-- `nread`: Number of reads
-- `seeing`: Seeing conditions
-- `focus`: Focus position
-- `configid`: Configuration ID
-- `designid`: Design ID  
-- `fieldid`: Field ID
-
-### Fiber Mapping Columns
-
-**FPS (SDSS-V) Columns:**
-- `sdss_id`: SDSS identifier
-- `catalogid`: Catalog identifier
-- `program`: Survey program
-- `category`: Target category
-- `firstcarton`: Primary carton
-- `ra`, `dec`: Target coordinates
-- `fiberId`: Fiber identifier
-
-**Plate (SDSS-IV) Columns:**
-- `sdss_id`: SDSS identifier
-- `target_id`: Target identifier
-- `target_ra`, `target_dec`: Target coordinates
-- `target_type`: Target classification
-- `source_type`: Source classification
-- `fiber_id`: Fiber identifier
-
-## Error Handling
-
-The package includes robust error handling for:
-- Database connection failures
-- Missing raw data files
-- Invalid date/MJD specifications
-- File I/O errors
-- Network connectivity issues
-
-Errors are logged using the configured logging system with appropriate severity levels.
-
+The click application (`almanac.cli:main`, installed as the `almanac` script). Its
+commands are documented in the [CLI Reference](cli-reference.md); `PGDUMP_TABLES` and
+`PGDUMP_EXTENDED_TABLES` are the tables `almanac pgdump` dumps.
