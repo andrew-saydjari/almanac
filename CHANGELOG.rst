@@ -57,9 +57,14 @@ past upstream's.
   ``uv.lock`` is fully upgraded inside those ranges (``uv lock --upgrade``), which includes
   upstream's dependabot packages. Major moves of direct dependencies: astropy 8, peewee 4,
   sdssdb 1.x, rich 15, pytest 9, Sphinx 9 (the undocumented ``Sphinx<8`` cap is lifted; the
-  docs build with ``-W``), myst-parser 5, isort 9, invoke 3, twine 7. ``sdss-semaphore`` is
-  capped below 0.2.9: 0.2.9 encodes more cartons, which changes ``/meta/sdss5_target_flags``
-  (measured). ``docs/requirements.txt`` follows the ``docs`` extra.
+  docs build with ``-W``), myst-parser 5, isort 9, invoke 3, twine 7. ``docs/requirements.txt``
+  follows the ``docs`` extra.
+* Behavior change in ``add metadata`` from sdss-semaphore 0.2.9 (now locked; the range is
+  ``>=0.2.8,<0.3``): it recognises more cartons, so ``/meta/sdss5_target_flags`` is wider
+  (73 vs 71 bytes per row on the test nights) and ``unknown_carton_pks`` shrinks (116 -> 112
+  entries). The first 71 bytes are unchanged (on the test nights 255 of 1,588 rows set bits
+  in the new bytes). ``/meta`` tables built before and after are not column-compatible
+  without zero-padding ``sdss5_target_flags``.
 * Not taken from upstream: ``almanac add fibers`` as written upstream (and the readers
   ``io.read_exposures`` / ``io.read_sequences`` that only it uses), the unpopulated ``ebv*`` ``Source`` fields, and
   default-on value-added queries (the fork has them as ``add metadata --extended``).
