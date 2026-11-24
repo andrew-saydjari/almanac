@@ -540,6 +540,44 @@ def apogee_id_source_attrs(source: Optional[Dict[str, Any]], full: bool = False)
     }
 
 
+def prepare_cross_match(
+    xmatch: bool,
+    live_apogee_id_join: bool = False,
+    full_apogee_id_lookup: bool = False,
+):
+    """
+    The once-per-run cross-match setup shared by `almanac --fibers` and
+    `almanac add fibers`, run in the parent process before any worker starts.
+
+    Decides whether APOGEE ID lookups read the materialized view or run the
+    live join (logging the view's refresh date and any staleness warning),
+    and, with `full_apogee_id_lookup`, builds the full lookup once and
+    installs it in this process.
+
+    :returns:
+        `(source, lookup_attrs, full_lookup)`: the resolved source (to ship to
+        pool workers), the per-night attributes that record it, and the full
+        lookup or None. All empty/None when `xmatch` is False.
+    """
+    if not xmatch:
+        return None, {}, None
+    source = resolve_apogee_id_source(force_live_join=live_apogee_id_join)
+    lookup_attrs = apogee_id_source_attrs(source, full=full_apogee_id_lookup)
+    full_lookup = None
+    if full_apogee_id_lookup:
+        # Opt-in: one heavy query for every DR17 allStar APOGEE ID
+        # (~734k rows; 11-40 min warm, hours with a cold database
+        # cache). By default each night queries only the APOGEE IDs it
+        # needs (see `get_apogee_id_lookup`).
+        logger.info(
+            "Building full APOGEE ID lookup (--full-apogee-id-lookup; "
+            "slow database step)"
+        )
+        full_lookup = create_apogee_id_lookup()
+        set_apogee_id_lookup(full_lookup)
+    return source, lookup_attrs, full_lookup
+
+
 def _query_apogee_id_rows_from_view(view: str, apogee_ids: Optional[Sequence[str]] = None) -> List[Tuple[int, str]]:
     """
     (sdss_id, apogee_id) rows from the materialized view: all rows, or only
@@ -1301,7 +1339,48 @@ def get_almanac_data(
     """
 
     exposures, missing = get_exposures_and_missing(observatory, mjd)
+    return process_night(
+        observatory,
+        mjd,
+        exposures,
+        missing,
+        fibers=fibers,
+        meta=meta,
+        only_assign_sdss_id_to_first_exposure_per_configuration=(
+            only_assign_sdss_id_to_first_exposure_per_configuration
+        ),
+        overrides=overrides,
+    )
 
+
+def process_night(
+    observatory: str,
+    mjd: int,
+    exposures: List[Exposure],
+    missing=(),
+    fibers: bool = False,
+    meta: bool = False,
+    only_assign_sdss_id_to_first_exposure_per_configuration: bool = True,
+    overrides: bool = True,
+):
+    """
+    Everything `get_almanac_data` does after the exposures are read: apply the
+    exposure overrides, build the sequences and (with `fibers`) apply the
+    fiber overrides and cross-match the fiber targets.
+
+    This is the one code path for a night. `almanac` calls it through
+    `get_almanac_data` with exposures read from the raw headers; `almanac add
+    fibers` calls it with exposures read back from an almanac file and rewound
+    to their header values (`almanac.overrides.rewind_exposure_overrides`).
+
+    :param exposures:
+        The night's exposures, in exposure-number order, with header values
+        (no override applied yet). Modified in place.
+    :param missing:
+        The missing-exposure records, returned unchanged.
+
+    The other parameters and the return value are those of `get_almanac_data`.
+    """
     night_overrides = []
     if overrides:
         from almanac.overrides import overrides_for, apply_exposure_overrides
@@ -1341,4 +1420,4 @@ def get_almanac_data(
             include_first_exposure_per_fiber_map_key=bool(night_overrides),
         )
 
-    return (observatory, mjd, exposures, sequences, missing)
+    return (observatory, mjd, exposures, sequences, list(missing))

@@ -122,6 +122,10 @@ If the run is interrupted or some nights fail, simply re-run the same command: o
 
 Every detected missing exposure is recorded in a run-level `/missing_exposures` table in the output file, with a reason code distinguishing gaps on disk, database/disk mismatches, and database outages. Review this table before downstream processing; see [Data Formats](data-formats.md) for the schema and reason codes.
 
+## Adding Fiber Mappings Later
+
+`almanac add fibers survey.h5 --output survey_fibers.h5` adds fiber mappings to a file built without `--fibers`, running the same code as `almanac --fibers` on the stored exposures (overrides and hand-placed targets included). Use `--in-place` to modify the input. Nights whose stored exposures would change under the current override list are refused; rebuild them with `almanac`.
+
 ## Adding Catalog Metadata
 
 Once you have an output file with fiber mappings, `almanac add metadata` decorates it with a `meta/` group containing astrometry, photometry, and targeting flags for every cross-matched target (queried once per unique `sdss_id`):

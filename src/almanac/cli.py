@@ -245,11 +245,11 @@ def main(
 
             def _write_night(observatory_w, mjd_w, exposures_w, sequences_w):
                 io.update(fp, observatory_w, mjd_w, exposures_w, sequences_w, **io_kwds)
-                fp[f"raw/{observatory_w}/{mjd_w}"].attrs.update(override_attrs)
-                if lookup_attrs:
-                    # Which APOGEE ID -> SDSS ID source cross-matching used
-                    # (view and its refresh date, or the live join).
-                    fp[f"raw/{observatory_w}/{mjd_w}"].attrs.update(lookup_attrs)
+                # Overrides on/off, and which APOGEE ID -> SDSS ID source
+                # cross-matching used (shared with `add fibers`).
+                io.write_night_attrs(
+                    fp, observatory_w, mjd_w, override_attrs, lookup_attrs
+                )
 
             def _on_write_error(item, exception):
                 observatory_w, mjd_w = item[:2]
@@ -262,30 +262,14 @@ def main(
                 on_error=_on_write_error,
             ).start()
 
-        full_lookup = None
-        lookup_attrs = {}
-        apogee_id_source = None
-        if fibers and not no_x_match and tasks:
-            # Decide once, in this process, whether APOGEE ID lookups read the
-            # materialized view or run the live join; log the view's refresh
-            # date and any staleness warning; record the choice per night.
-            apogee_id_source = apogee.resolve_apogee_id_source(
-                force_live_join=live_apogee_id_join
-            )
-            lookup_attrs = apogee.apogee_id_source_attrs(
-                apogee_id_source, full=full_apogee_id_lookup
-            )
-        if full_apogee_id_lookup and fibers and not no_x_match and tasks:
-            # Opt-in: one heavy query for every DR17 allStar APOGEE ID
-            # (~734k rows; 11-40 min warm, hours with a cold database
-            # cache). By default each night queries only the APOGEE IDs it
-            # needs (see `apogee.get_apogee_id_lookup`).
-            logger.info(
-                "Building full APOGEE ID lookup (--full-apogee-id-lookup; "
-                "slow database step)"
-            )
-            full_lookup = apogee.create_apogee_id_lookup()
-            apogee.set_apogee_id_lookup(full_lookup)
+        # Decide once, in this process, whether APOGEE ID lookups read the
+        # materialized view or run the live join (and, opt-in, build the full
+        # lookup); record the choice per night. Shared with `add fibers`.
+        apogee_id_source, lookup_attrs, full_lookup = apogee.prepare_cross_match(
+            bool(fibers and not no_x_match and tasks),
+            live_apogee_id_join=live_apogee_id_join,
+            full_apogee_id_lookup=full_apogee_id_lookup,
+        )
 
         with context_manager as live:
             if processes > 1:
@@ -717,6 +701,222 @@ def _get_sdss_ids(fp, obs, mjd):
     for config in group:
         sdss_ids.update(group[config]["sdss_id"][:])
     return sdss_ids
+
+
+def _select_nights(fp, observatories, mjds=None):
+    """
+    The (observatory, mjd) pairs with an exposures table in an almanac file,
+    restricted to the given observatories and, if given, MJDs.
+    """
+    mjds = None if mjds is None else {int(m) for m in mjds}
+    nights = []
+    for observatory in observatories:
+        if f"raw/{observatory}" not in fp:
+            continue
+        for key in sorted(fp[f"raw/{observatory}"], key=int):
+            mjd = int(key)
+            if (mjds is None or mjd in mjds) and f"raw/{observatory}/{mjd}/exposures" in fp:
+                nights.append((observatory, mjd))
+    return nights
+
+
+def _add_fibers_task(observatory, mjd, exposures, xmatch, overrides):
+    """
+    The `add fibers` worker: rewind exposures read back from the file to their
+    header values, then run the same night pipeline as `almanac --fibers`
+    (`apogee.process_night`: exposure overrides, fiber overrides,
+    cross-match). Module level so that it pickles.
+    """
+    from almanac import apogee
+    from almanac.overrides import rewind_exposure_overrides
+
+    rewind_exposure_overrides(exposures)
+    observatory, mjd, exposures, sequences, _missing = apogee.process_night(
+        observatory, mjd, exposures, (), fibers=True, meta=xmatch, overrides=overrides
+    )
+    return observatory, mjd, exposures, sequences
+
+
+@add.command()
+@click.argument("input_path", type=str)
+@click.option("--mjd", default=None, type=int,
+              help="Modified Julian date. Use negative values to indicate relative to current MJD")
+@click.option("--mjds", default=None, type=str,
+              help="Comma-separated explicit MJD list (non-contiguous OK)")
+@click.option("--mjd-start", default=None, type=int, help="Start of MJD range")
+@click.option("--mjd-end", default=None, type=int, help="End of MJD range")
+@click.option("--date", default=None, type=str, help="Date (e.g., 2024-01-15)")
+@click.option("--date-start", default=None, type=str, help="Start of date range")
+@click.option("--date-end", default=None, type=str, help="End of date range")
+@click.option("--apo", is_flag=True, help="Apache Point Observatory nights")
+@click.option("--lco", is_flag=True, help="Las Campanas Observatory nights")
+@click.option("--output", "-O", "output_path", default=None, type=str,
+              help="Copy INPUT to this new file and add the fiber mappings to the copy (INPUT is only read).")
+@click.option("--in-place", is_flag=True, default=False,
+              help="Rewrite the fiber mappings of INPUT itself. Required when --output is not given.")
+@click.option("--no-x-match", is_flag=True, help="Do not cross-match targets with SDSS-V database")
+@click.option("--no-overrides", is_flag=True,
+              help="Do not apply the exposure overrides (the nights must have been built without them)")
+@click.option("--full-apogee-id-lookup", is_flag=True,
+              help="Build the full APOGEE ID -> SDSS ID lookup once up front (as for `almanac`)")
+@click.option("--live-apogee-id-join", is_flag=True,
+              help="Never read the APOGEE ID -> SDSS ID materialized view (as for `almanac`)")
+@click.option("--processes", "-p", default=None, type=int,
+              help="Worker processes (one observatory/MJD each). Default and meaning as for `almanac`.")
+@click.option("--query-workers", default=None, type=int,
+              help="Most worker processes that hold a database connection at once (as for `almanac`).")
+def fibers(
+    input_path, mjd, mjds, mjd_start, mjd_end, date, date_start, date_end, apo, lco,
+    output_path, in_place, no_x_match, no_overrides, full_apogee_id_lookup,
+    live_apogee_id_join, processes, query_workers, **kwargs,
+):
+    """Add fiber mappings (cross-matched) to an almanac file built without --fibers.
+
+    \b
+    Runs, for every selected night, the same code as `almanac --fibers`
+    (exposure overrides, fiber overrides, sdss_id cross-match, fiber writer
+    and night attributes), starting from the exposures stored in the file
+    instead of the raw headers. The stored exposures are first returned to
+    their header values, re-processed with the current override list, and
+    compared with the stored exposures table and sequences: a night whose exposure columns would
+    change (the override list changed since the night was built, or it was
+    built with the other --no-overrides setting) is refused, listed at the
+    end, and left untouched; rebuild it with `almanac`. Exposure columns and
+    sequences are never rewritten. Every fiber table of an accepted night is
+    replaced.
+
+    \b
+      almanac add fibers almanac.h5 --output almanac_fibers.h5
+      almanac add fibers almanac.h5 --in-place --mjd 60285 --apo
+    """
+    import os
+    import shutil
+    import sys
+    import functools
+    import concurrent.futures
+    import multiprocessing
+    import h5py as h5
+    from almanac import apogee, io, logger, parallel, utils
+    from almanac.overrides import load_overrides, overrides_attrs
+
+    if output_path and in_place:
+        raise click.UsageError("Give --output or --in-place, not both.")
+    if not output_path and not in_place:
+        raise click.UsageError(
+            "add fibers rewrites fiber tables: give --output NEW.h5 (INPUT is only "
+            "read) or --in-place to modify INPUT."
+        )
+    if not os.path.exists(input_path):
+        raise click.UsageError(f"{input_path} does not exist")
+    if output_path:
+        if os.path.exists(output_path):
+            raise click.UsageError(f"--output {output_path} exists; choose a new path")
+        if os.path.abspath(output_path) == os.path.abspath(input_path):
+            raise click.UsageError("--output must differ from INPUT")
+
+    observatories = utils.get_observatories(apo, lco)
+    mjds_sel, *_ = utils.parse_mjds(
+        mjd, mjd_start, mjd_end, date, date_start, date_end, return_nones=True, mjds=mjds
+    )
+    if not no_overrides:
+        load_overrides()  # a malformed override file fails here, before any work
+    override_attrs = overrides_attrs(not no_overrides)
+    xmatch = not no_x_match
+
+    with h5.File(input_path, "r") as fp:
+        nights = _select_nights(fp, observatories, mjds_sel)
+    if not nights:
+        logger.warning(f"No nights with an exposures table selected in {input_path}")
+        sys.exit(1)
+
+    target = input_path
+    if output_path:
+        shutil.copyfile(input_path, output_path)
+        target = output_path
+        logger.info(f"Copied {input_path} to {output_path}; adding fiber mappings to the copy")
+
+    processes_resolved = parallel.resolve_processes(processes, n_tasks=len(nights))
+    query_workers_resolved = parallel.resolve_query_workers(query_workers)
+    processes = processes_resolved[0]
+    query_workers = query_workers_resolved[0]
+    use_db_gate = xmatch and processes > 1 and processes > query_workers
+    logger.info(f"Parallelism: {parallel.describe(processes_resolved, query_workers_resolved)}")
+
+    apogee_id_source, lookup_attrs, full_lookup = apogee.prepare_cross_match(
+        xmatch,
+        live_apogee_id_join=live_apogee_id_join,
+        full_apogee_id_lookup=full_apogee_id_lookup,
+    )
+
+    failed, refused, done = [], [], []
+    with h5.File(target, "a") as fp:
+
+        def _write(observatory, mjd, exposures, sequences):
+            group = fp[f"raw/{observatory}/{mjd}/exposures"]
+            differences = io.compare_exposures(group, exposures)
+            differences += io.compare_sequences(fp, observatory, mjd, sequences)
+            if differences:
+                refused.append((observatory, mjd, differences))
+                logger.error(
+                    f"{observatory}/{mjd}: refused, the stored exposures differ from the "
+                    f"re-processed ones ({'; '.join(differences[:3])}"
+                    f"{'; ...' if len(differences) > 3 else ''}). Rebuild this night with `almanac`."
+                )
+                return
+            io.delete_hdf5_entry(fp, f"raw/{observatory}/{mjd}/fibers")
+            io.write_fibers(fp, observatory, mjd, exposures)
+            io.write_night_attrs(
+                fp, observatory, mjd, override_attrs, lookup_attrs,
+                clear_stale_lookup_attrs=True,
+            )
+            done.append((observatory, mjd))
+
+        def _args(observatory, mjd):
+            return (observatory, mjd, io.read_exposures(fp, observatory, mjd), xmatch, not no_overrides)
+
+        if processes > 1:
+            mp_context = multiprocessing.get_context()
+            db_gate = mp_context.BoundedSemaphore(query_workers) if use_db_gate else None
+            if "almanac.database" in sys.modules:
+                try:
+                    sys.modules["almanac.database"].database.close()
+                except Exception:
+                    pass
+            task_fn = (
+                functools.partial(parallel.run_task_releasing_db_slot, _add_fibers_task)
+                if use_db_gate else _add_fibers_task
+            )
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=processes,
+                initializer=_pool_initializer,
+                initargs=(full_lookup, apogee_id_source, db_gate),
+                mp_context=mp_context,
+            ) as pool:
+                futures = {
+                    pool.submit(task_fn, *_args(o, m)): (o, m) for o, m in nights
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    observatory, mjd = futures[future]
+                    try:
+                        _write(*future.result())
+                    except Exception as e:
+                        logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
+                        failed.append((observatory, mjd, str(e)))
+        else:
+            for observatory, mjd in nights:
+                try:
+                    _write(*_add_fibers_task(*_args(observatory, mjd)))
+                except Exception as e:
+                    logger.exception(f"Failed to add fibers for {observatory}/{mjd}: {e}")
+                    failed.append((observatory, mjd, str(e)))
+
+    logger.info(f"Added fiber mappings for {len(done)} of {len(nights)} nights in {target}")
+    for observatory, mjd, differences in refused:
+        logger.warning(f"  refused {observatory}/{mjd}: {'; '.join(differences)}")
+    for observatory, mjd, message in failed:
+        logger.warning(f"  failed {observatory}/{mjd}: {message}")
+    if refused or failed:
+        sys.exit(1)
 
 
 @add.command()

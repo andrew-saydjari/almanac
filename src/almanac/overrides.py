@@ -764,3 +764,36 @@ def apply_fiber_overrides(exposures, entries: List[Override], targets: Optional[
             if e.image_type == "object" and _header_key(e) == key and e.exposure not in affected:
                 _set_targets(e, reference_targets)
                 break
+
+
+def rewind_exposure_overrides(exposures) -> None:
+    """
+    Return exposures read back from an almanac file (`almanac.io.read_exposures`)
+    to their header values, undoing what `apply_exposure_overrides` and
+    `assign_override_table_ids` stored, so that the night can be processed
+    again by exactly the code `almanac` runs (`almanac.apogee.process_night`):
+
+    * `plate_id` / `config_id` go back to `original_plate_id` /
+      `original_config_id` (synthetic fiber-table IDs and configuration
+      overrides are undone);
+    * `override_ids` / `override_actions` are cleared, and so is the private
+      override state (not-science flag, fiber-table IDs, cached targets).
+
+    `design_id` / `field_id` are left as stored: only a configuration override
+    changes them, and re-applying it sets them again from the confSummary.
+    Whether the re-processed exposures equal the stored ones is checked by the
+    caller (`almanac add fibers` refuses a night where they differ).
+    """
+    for e in exposures:
+        if e._original_plate_id is not None:
+            e.plate_id = e._original_plate_id
+        if e._original_config_id is not None:
+            e.config_id = e._original_config_id
+        e._original_plate_id = None
+        e._original_config_id = None
+        e._override_table_id = None
+        e._override_table_group = None
+        e._override_not_science = False
+        e.override_ids = ""
+        e.override_actions = ""
+        _set_targets(e, None)
