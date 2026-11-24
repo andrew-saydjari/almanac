@@ -20,9 +20,11 @@ past upstream's.
   bodies: targeted APOGEE ID lookups through the maintainers' table, best rank then smallest
   ``sdss_id``, no ``sdss_id`` for unplugged or off-target fibers, and exposure-override keys.
   Outputs are unchanged.
-* Lock refresh to upstream's dependabot versions: requests 2.33.0, pygments 2.20.0,
-  pytest 9.0.3 (with pytest-asyncio 1.4.0), urllib3 2.7.0, idna 3.15, cryptography 50.0.0,
-  pillow 12.3.0, soupsieve 2.8.4.
+* Lock refresh of upstream's dependabot packages, each to the latest version the declared
+  constraints allow (``uv lock --upgrade-package``; nothing else upgraded): requests 2.34.2,
+  pygments 2.21.0, pytest 9.2.0 (with pytest-asyncio 1.5.0), urllib3 2.8.0, idna 3.20,
+  cryptography 50.0.2, pillow 13.0.0, soupsieve 4.1.3 (2.10 on Python < 3.11.5, which
+  soupsieve 4 does not support).
 * Not taken from upstream: ``almanac add fibers`` (and the readers ``io.read_exposures`` /
   ``io.read_sequences`` that only it uses), the unpopulated ``ebv*`` ``Source`` fields, and
   default-on value-added queries (the fork has them as ``add metadata --extended``).
