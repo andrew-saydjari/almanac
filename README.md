@@ -123,8 +123,11 @@ available) and then the 2MASS point-source catalog. When an identifier reaches s
 
 ### Verbosity
 
-By default `almanac` only logs. `-v` shows a live progress display; `-vv` also prints the
-exposure table of each night at the end.
+By default `almanac` logs and, on a terminal, draws progress bars (nights done, rate,
+ETA; also for `add metadata`, `add fibers`, `dump` and `postprocess`). The bars are never
+written to a file or pipe (`>> log 2>&1`, `nohup`), and `--no-progress` or
+`ALMANAC_NO_PROGRESS=1` turns them off. `-v` shows a live full-screen display; `-vv` also
+prints the exposure table of each night at the end.
 
 ![](https://github.com/sdss/almanac/blob/e3f46c8ce66b88843de943ca31eec88d12be8f06/docs/almanac-example-2.gif)
 

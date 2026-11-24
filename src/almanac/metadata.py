@@ -150,8 +150,10 @@ def read_id_list(path: str) -> np.ndarray:
     return np.unique(np.asarray(ids, dtype=np.int64))
 
 
-def collect_sdss_ids(input_path: str, observatories: Sequence[str], mjds=None) -> np.ndarray:
-    """Sorted unique sdss_id in ``raw/<obs>/<mjd>/fibers/*/sdss_id`` (read-only)."""
+def collect_sdss_ids(input_path: str, observatories: Sequence[str], mjds=None,
+                     on_night: Optional[Callable[[], None]] = None) -> np.ndarray:
+    """Sorted unique sdss_id in ``raw/<obs>/<mjd>/fibers/*/sdss_id`` (read-only).
+    ``on_night()`` is called after each night with fiber mappings is read."""
     parts = []
     with h5.File(input_path, "r") as fp:
         for obs in observatories:
@@ -165,6 +167,8 @@ def collect_sdss_ids(input_path: str, observatories: Sequence[str], mjds=None) -
                 for config in group:
                     if "sdss_id" in group[config]:
                         parts.append(np.asarray(group[config]["sdss_id"][:], dtype=np.int64))
+                if on_night is not None:
+                    on_night()
     if not parts:
         return np.zeros(0, dtype=np.int64)
     return np.unique(np.concatenate(parts))
@@ -444,6 +448,7 @@ def _run_batches(
     max_batch_attempts: int,
     retry_backoff: float,
     retry_max_delay: float,
+    on_note: Optional[Callable[[str], None]] = None,
 ) -> None:
     """
     Run ``query_batch(ids, suffix)`` for every ``(index, ids)``; call
@@ -451,7 +456,10 @@ def _run_batches(
     finishes. A batch that raises (after the per-query reconnect retries in
     ``almanac.retry``) is retried later with exponential backoff, up to
     ``max_batch_attempts`` times; a crashed worker pool is rebuilt.
+    ``on_note(text)`` (optional) is told about failures and retry waits (for
+    the progress bar; the log lines are written regardless).
     """
+    note = on_note or (lambda text: None)
     attempts = Counter()
     todo = list(batches)
     round_ = 0
@@ -465,6 +473,7 @@ def _run_batches(
                 except Exception as e:
                     attempts[index] += 1
                     _log(f"batch {index} failed (attempt {attempts[index]}/{max_batch_attempts}): {e!r}")
+                    note(f"batch {index} failed, attempt {attempts[index]}/{max_batch_attempts}")
                     if attempts[index] >= max_batch_attempts:
                         raise MetadataBuildError(
                             f"batch {index} failed {attempts[index]} times; checkpoint kept, re-run to resume",
@@ -495,11 +504,13 @@ def _run_batches(
                         t_start, t_end, result = future.result()
                     except BrokenProcessPool as e:
                         _log(f"worker pool broke while running batch {index}: {e!r}; will rebuild it")
+                        note("worker pool broke; rebuilding it")
                         retry.append((index, ids))
                         continue
                     except Exception as e:
                         attempts[index] += 1
                         _log(f"batch {index} failed (attempt {attempts[index]}/{max_batch_attempts}): {e!r}")
+                        note(f"batch {index} failed, attempt {attempts[index]}/{max_batch_attempts}")
                         if attempts[index] >= max_batch_attempts:
                             raise MetadataBuildError(
                                 f"batch {index} failed {attempts[index]} times; checkpoint kept, re-run to resume",
@@ -523,7 +534,9 @@ def _run_batches(
             delay = min(retry_backoff * 2 ** round_, retry_max_delay)
             round_ += 1
             _log(f"{len(retry)} batch(es) to retry; waiting {delay:.0f} s")
+            note(f"{len(retry)} batch(es) to retry; waiting {delay:.0f} s")
             time.sleep(delay)
+            note(f"retrying {len(retry)} batch(es)")
         todo = sorted(retry)
 
 
@@ -688,6 +701,7 @@ def build_metadata(
     query_batch: Optional[Callable] = None,
     ids: Optional[Iterable[int]] = None,
     extended: bool = False,
+    progress=None,
 ) -> dict:
     """
     Build ``/meta`` for the sdss_id in ``input_path``. See the module docstring.
@@ -697,10 +711,18 @@ def build_metadata(
     :param ids: use these sdss_id instead of collecting them from the input
         (the input is then still the provenance record).
     :param extended: also build the value-added columns (``--extended``).
+    :param progress: an `almanac.progress.TaskDisplay` to report progress to
+        (reading the fiber mappings, querying, assembling); the caller opens
+        and closes it. Progress bars never replace the log lines.
     :returns: a summary dict (also stored as attributes on ``/meta``).
     """
     if extended:
         check_extended_requirements()
+    if progress is None:
+        from almanac.progress import TaskDisplay
+
+        progress = TaskDisplay(enabled=False)
+    bars = progress
     query_batch = query_batch or (_extended_query_batch if extended else _default_query_batch)
     input_path = os.path.abspath(input_path)
     if output_path:
@@ -727,7 +749,12 @@ def build_metadata(
                 f"WARNING: {n_nights - n_with} of {n_nights} selected nights in "
                 f"{input_path} have no fiber mappings and are skipped"
             )
-        all_ids = collect_sdss_ids(input_path, observatories, mjds)
+        bar_read = bars.add_task("Reading fiber mappings", total=n_with, unit="nights")
+        bars.start_task(bar_read)
+        all_ids = collect_sdss_ids(
+            input_path, observatories, mjds, on_night=lambda: bars.advance(bar_read)
+        )
+        bars.complete(bar_read)
     else:
         all_ids = np.unique(np.asarray(list(ids), dtype=np.int64))
     solar_ids = solar_system_ids(all_ids)
@@ -855,6 +882,12 @@ def build_metadata(
     recent = []
     state = dict(done_ids=n_done_ids, done_batches=len(batches) - len(todo), run_ids=0)
     total_ids = int(ids_to_query.size)
+    # Counts ids (not batches), starting from those in the checkpoint; only
+    # finished batches move it, so a failed or retried batch never moves it back.
+    bar_query = bars.add_task(
+        "Querying catalog", total=total_ids, unit="ids", initial=n_done_ids
+    )
+    bars.update_task(bar_query, note=f"{state['done_batches']:,}/{len(batches):,} batches")
 
     def on_done(index, ids_b, result, t0, t1):
         columns, descriptions, unknown, pairs = results_to_columns(result, extended)
@@ -876,14 +909,16 @@ def build_metadata(
         eta = (
             datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=eta_s)
         ).isoformat(timespec="minutes") if np.isfinite(eta_s) else "UNKNOWN"
-        progress = dict(
+        progress_record = dict(
             updated_utc=_utcnow(),
             batches_done=state["done_batches"], batches_total=len(batches),
             ids_done=state["done_ids"], ids_total=total_ids,
             rate_ids_per_s_this_run=round(rate, 3), rate_ids_per_s_recent=round(rate_recent, 3),
             eta_utc=eta, last_batch=index, last_batch_found=len(columns.get("sdss_id", [])),
         )
-        ckpt.write_progress(progress)
+        ckpt.write_progress(progress_record)
+        bars.advance(bar_query, len(ids_b))
+        bars.update_task(bar_query, note=f"{state['done_batches']:,}/{len(batches):,} batches")
         _log(
             f"batch {index} done ({len(columns.get('sdss_id', [])):,}/{len(ids_b):,} found); "
             f"{state['done_ids']:,}/{total_ids:,} ids ({100 * state['done_ids'] / max(total_ids, 1):.2f}%), "
@@ -898,15 +933,20 @@ def build_metadata(
         old_handler = signal.signal(signal.SIGTERM, _sigterm)
     except ValueError:  # not in the main thread
         pass
+    def on_note(text):
+        bars.update_task(bar_query, note=f"{state['done_batches']:,}/{len(batches):,} batches; {text}")
+
     try:
         _run_batches(todo, query_batch, query_workers, on_done,
-                     max_batch_attempts, retry_backoff, retry_max_delay)
+                     max_batch_attempts, retry_backoff, retry_max_delay, on_note=on_note)
     except _Terminated:
         _log("terminated; finished batches are kept in the checkpoint; re-run the same command to resume")
         raise SystemExit(143)
     finally:
         if old_handler is not None:
             signal.signal(signal.SIGTERM, old_handler)
+    bars.complete(bar_query)
+    bars.update_task(bar_query, note=f"{len(batches):,}/{len(batches):,} batches")
     query_end = _utcnow()
     manifest = ckpt.read_manifest()
     if not manifest.get("query_end_utc") or todo:
@@ -922,8 +962,11 @@ def build_metadata(
         parts.append(solar_columns)
         descriptions.update(solar_descriptions)
     pair_parts = [copied_pairs]
+    bar_assemble = bars.add_task("Assembling /meta", total=len(batches), unit="batches")
+    bars.start_task(bar_assemble)
     for i, _ in batches:
         q, cols, desc, unknown, _, _, pairs = ckpt.read_batch(i)
+        bars.advance(bar_assemble)
         pair_parts.append(pairs)
         queried.append(q)
         parts.append(cols)
@@ -991,7 +1034,11 @@ def build_metadata(
         NOT_FOUND_GROUP: {"sdss_id": not_found},
         CARTON_GROUP: {"sdss_id": carton_ids, "carton_pk": carton_pks},
     }
+    bars.complete(bar_assemble)
+    bar_write = bars.add_task(f"Writing /{META_GROUP} ({found.size:,} rows)", total=1)
+    bars.start_task(bar_write)
     _write_final(input_path, output_path, columns, descriptions, extras, attrs)
+    bars.complete(bar_write)
     _log(
         f"wrote /{META_GROUP} ({found.size:,} rows; {not_found.size:,} ids not found) to "
         f"{output_path or input_path}"

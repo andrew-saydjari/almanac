@@ -82,9 +82,14 @@ several files.
 ### Q: What do the verbosity levels do?
 
 **A:**
-- **No flag**: log messages only
+- **No flag**: log messages (and, on a terminal, progress bars)
 - **-v**: a live full-screen progress display
 - **-vv**: the progress display, then the exposure table of every night
+
+Progress bars are drawn only when standard output and standard error are terminals, so a
+log file (`... >> log 2>&1`) never contains them; `--no-progress` or
+`ALMANAC_NO_PROGRESS=1` turns them off. See
+[Progress bars](cli-reference.md#progress-bars).
 
 ### Q: How do I save data to a file?
 
