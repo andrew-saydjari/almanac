@@ -351,9 +351,10 @@ a section name prints the whole section.
 
 ### `almanac config set <key> <value>`
 Set one setting and save the file. Nested settings use dot notation; a whole section
-cannot be set at once. The value is stored as text (a YAML string, e.g.
-`logging_level: '10'`); almanac converts the numeric settings when it reads them. Edit
-the file directly for list values (`display_field_names`).
+cannot be set at once. The value is converted to the type of the key (integer, number,
+text, or a list as YAML or comma-separated); a value that does not fit is refused (exit
+status 1) and nothing is saved. `almanac config update <key> <value>` is a hidden,
+deprecated alias.
 
 ```bash
 almanac config set logging_level 10

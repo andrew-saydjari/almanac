@@ -34,10 +34,12 @@ almanac config set sdssdb.host localhost
 almanac config set sdssdb.port 63333
 ```
 
-`config set` stores the value as text (`logging_level: '10'` in the file); almanac converts
-the numeric settings when it reads them. A whole section (`sdssdb`,
-`sdssdb_exposure_min_mjd`) cannot be set at once, and list values
-(`display_field_names`) must be edited in the file.
+`config set` converts the value to the type of the key (integer, number, text, or a list
+given as YAML or comma-separated, e.g. `almanac config set display_field_names
+exposure,image_type`) and refuses a value that does not fit (`logging_level debug` is an
+error). A whole section (`sdssdb`, `sdssdb_exposure_min_mjd`) cannot be set at once.
+(Values written as text by almanac versions before this change, e.g. `logging_level:
+'10'`, still work: almanac converts the numeric settings it reads.)
 
 ## Configuration Reference
 

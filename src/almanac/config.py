@@ -1,6 +1,6 @@
 import os
 import yaml
-from typing import List, Dict
+from typing import List, Dict, get_args, get_origin
 from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
 
@@ -74,6 +74,86 @@ class Config:
             "observer_comment"
         ]
     )
+
+class ConfigValueError(ValueError):
+    """A configuration key does not exist, or a value does not fit its type."""
+
+
+def coerce_value(field_type, text: str):
+    """
+    Convert the text given to `almanac config set` to the declared type of
+    the field: int, float, bool, str, or a list (YAML or comma-separated).
+    Raises `ConfigValueError` if it does not fit.
+    """
+    text = str(text)
+    origin = get_origin(field_type)
+    if origin in (list, List):
+        (item_type,) = get_args(field_type) or (str,)
+        try:
+            parsed = yaml.safe_load(text)
+        except yaml.YAMLError:
+            parsed = None
+        items = parsed if isinstance(parsed, list) else [x.strip() for x in text.split(",") if x.strip()]
+        return [coerce_value(item_type, x) for x in items]
+    if field_type is bool:
+        lowered = text.strip().lower()
+        if lowered in ("1", "true", "yes", "on"):
+            return True
+        if lowered in ("0", "false", "no", "off"):
+            return False
+        raise ConfigValueError(f"expected true or false, got {text!r}")
+    if field_type is int:
+        try:
+            return int(text.strip())
+        except ValueError:
+            raise ConfigValueError(f"expected an integer, got {text!r}") from None
+    if field_type is float:
+        try:
+            return float(text.strip())
+        except ValueError:
+            raise ConfigValueError(f"expected a number, got {text!r}") from None
+    if field_type is str:
+        return text
+    raise ConfigValueError(f"cannot set a value of type {field_type!r} from the command line")
+
+
+def set_config_value(config, key: str, text: str, sep: str = "."):
+    """
+    Set the configuration value at dotted `key` (e.g. ``sdssdb.port``) from
+    `text`, converted to the field's declared type (`coerce_value`). Returns
+    the new value. Raises `ConfigValueError` for an unknown key, a key that
+    names a group of settings, or a value that does not fit.
+    """
+    scope, provenance = config, []
+    parts = key.split(sep)
+    for i, part in enumerate(parts):
+        fields = {f.name: f.type for f in scope.__dataclass_fields__.values()}
+        context = f" within '{sep.join(provenance)}'" if provenance else ""
+        if part not in fields:
+            raise ConfigValueError(
+                f"No configuration key '{part}'{context}. "
+                f"Available{context}: {', '.join(fields)}"
+            )
+        field_type = fields[part]
+        if i < len(parts) - 1:
+            if not is_dataclass(field_type):
+                raise ConfigValueError(f"Key '{part}'{context} is not a group of settings")
+            scope, provenance = getattr(scope, part), provenance + [part]
+            continue
+        if is_dataclass(field_type):
+            raise ConfigValueError(
+                f"Key '{part}'{context} refers to a configuration class. "
+                f"You must set the values of the configuration class individually "
+                f"(e.g. {sep.join(provenance + [part, next(iter(field_type.__dataclass_fields__))])}), "
+                f"or edit the configuration file {get_config_path()}"
+            )
+        try:
+            value = coerce_value(field_type, text)
+        except ConfigValueError as e:
+            raise ConfigValueError(f"Invalid value for '{key}': {e}") from None
+        setattr(scope, part, value)
+        return value
+
 
 def get_config_path():
     config_dir = Path.home() / ".almanac"

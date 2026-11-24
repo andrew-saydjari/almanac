@@ -6,6 +6,9 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* ``config set`` converts the value to the key's declared type (int, float, bool, str, list)
+  and refuses a value that does not fit; the hidden ``config update`` alias no longer
+  crashes (it called the builtin ``set``). ``config.set_config_value``, ``coerce_value``.
 * ``retarget_fibers`` works on FPS fibers: the row rewrite sets the FPS identifier fields
   (``twomass_designation``, ``catalogid``, ``ra``, ``dec``) instead of the plate-only
   ``target_ids``/``twomass_id`` (which raised a ValidationError), and the row is

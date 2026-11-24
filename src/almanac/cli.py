@@ -2148,66 +2148,35 @@ def get(key, **kwargs):
 @config.command(hidden=True)
 @click.argument("key")
 @click.argument("value")
-def update(key, value, **kwargs):
-    """Update a configuration value"""
-    click.echo(click.style("Deprecated: use `almanac config set`", fg="yellow"))
-    return set(key, value, **kwargs)
+@click.pass_context
+def update(ctx, key, value, **kwargs):
+    """Update a configuration value (deprecated alias of `config set`)"""
+    click.echo(click.style("Deprecated: use `almanac config set`", fg="yellow"), err=True)
+    return ctx.invoke(_set, key=key, value=value)
 
 
 @config.command(name="set")
 @click.argument("key")
 @click.argument("value")
 def _set(key, value, **kwargs):
-    """Set a configuration value"""
+    """Set a configuration value (converted to the key's type)
+
+    \b
+    The value is converted to the type of the key (integer, number, text, or a
+    list given as YAML or comma-separated); a value that does not fit is
+    refused. Nested keys use dots, e.g. `almanac config set sdssdb.port 5432`.
+    """
 
     from almanac import config, get_config_path, ConfigManager
-    from dataclasses import asdict, is_dataclass
+    from almanac.config import ConfigValueError, set_config_value
 
-    def traverse(config, key, value, provenance=None, sep="."):
-        parent, *child = key.split(sep, 1)
-
-        try:
-            scope = getattr(config, parent)
-        except AttributeError:
-            context = sep.join(provenance or [])
-            if context:
-                context = f" within '{context}'"
-
-            if not isinstance(config, dict):
-                config = asdict(config)
-
-            raise click.ClickException(
-                f"No configuration key '{parent}'{context}. "
-                f"Available{context}: {', '.join(config.keys())}"
-            )
-
-        else:
-
-            if not child:
-
-                fields = {f.name: f.type for f in config.__dataclass_fields__.values()}
-                field_type = fields[parent]
-                if is_dataclass(field_type):
-                    context = sep.join(provenance or [])
-                    if context:
-                        context = f" within '{context}'"
-
-                    raise click.ClickException(
-                        f"Key '{parent}'{context} refers to a configuration class. "
-                        f"You must set the values of the configuration class individually. "
-                        f"Sorry! "
-                        f"Or you can directly edit the configuration file {get_config_path()}"
-                    )
-
-                setattr(config, parent, value)
-            else:
-                provenance = (provenance or []) + [parent]
-                traverse(scope, child[0], value)
-
-    traverse(config, key, value)
+    try:
+        new_value = set_config_value(config, key, value)
+    except ConfigValueError as e:
+        raise click.ClickException(str(e))
     config_path = get_config_path()
     ConfigManager.save(config, config_path)
-    click.echo(f"Updated configuration {key} to {value} in {config_path}")
+    click.echo(f"Updated configuration {key} to {new_value!r} in {config_path}")
 
 
 @main.group()
