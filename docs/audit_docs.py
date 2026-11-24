@@ -254,6 +254,17 @@ def build_synthetic(tmp):
         ext_attrs = metadata.build_metadata(path, output_path=ext_path, query_batch=fake,
                                             query_workers=0, extended=True,
                                             checkpoint_dir=os.path.join(tmp, "ck_ext"))
+    # The /run_summary group as the main command writes it: a run over one
+    # night before the operations database coverage, with no raw data (no
+    # database connection, nothing on disk).
+    from click.testing import CliRunner
+    from almanac.cli import main as cli_main
+    run_path = os.path.join(tmp, "run_summary.h5")
+    CliRunner().invoke(cli_main, ["--mjd", "51000", "--apo", "-O", run_path, "-p", "1"],
+                       catch_exceptions=False)
+    with h5.File(run_path, "r") as fp:
+        run_summary = dict(datasets=sorted(fp["run_summary"]), attrs=sorted(fp["run_summary"].attrs))
+
     with h5.File(path, "r") as fp:
         solar_row = {k: (fp["meta"][k][list(fp["meta/sdss_id"][:]).index(0)].item()
                          if fp["meta"][k].ndim == 1 else "array")
@@ -264,7 +275,7 @@ def build_synthetic(tmp):
         meta_attrs=sorted(default_attrs), meta_attrs_extended=sorted(ext_attrs),
         solar_row={k: (v.decode() if isinstance(v, bytes) else v) for k, v in solar_row.items()},
         fps_sequences=seqs, night_attrs=sorted(set(overrides_attrs(True)) | set(lookup_attrs)),
-        synthetic_table_id=synthetic,
+        synthetic_table_id=synthetic, run_summary=run_summary,
     )
 
 
@@ -487,6 +498,27 @@ def marked_tables(text):
     return out
 
 
+def check_exit_status_table(repo):
+    """The exit-status table of cli-reference.md lists exactly `ExitStatus`, with its codes."""
+    from almanac.exit_codes import ExitStatus
+
+    path = Path(repo) / "docs/cli-reference.md"
+    text = path.read_text()
+    tables = marked_tables(text)
+    if "exit_status" not in tables:
+        problem("ERROR", "docs/cli-reference.md", "no `<!-- audit:table exit_status -->` table")
+        return
+    documented = set(tables["exit_status"])
+    expected = {s.name for s in ExitStatus}
+    for n in sorted(expected - documented):
+        problem("ERROR", "docs/cli-reference.md (exit_status)", f"`{n}` is defined but not documented")
+    for n in sorted(documented - expected):
+        problem("ERROR", "docs/cli-reference.md (exit_status)", f"`{n}` is documented but not defined")
+    for status in ExitStatus:
+        if f"| `{status.name}` | {int(status)} |" not in text:
+            problem("ERROR", "docs/cli-reference.md (exit_status)", f"`{status.name}` should have code {int(status)}")
+
+
 def check_hdf5_tables(repo, synth):
     path = Path(repo) / "docs/data-formats.md"
     tables = marked_tables(path.read_text())
@@ -497,6 +529,8 @@ def check_hdf5_tables(repo, synth):
         "sequences": {k.split("/")[-1] for k in f if k.startswith("/raw/apo/60000/sequences/")},
         "meta_attrs": set(synth["meta_attrs"]) | set(synth["meta_attrs_extended"]),
         "meta_side_groups": {k[1:] for k in f if k.startswith("/meta_") and f[k]["kind"] == "dataset"},
+        "run_summary": set(synth["run_summary"]["datasets"]),
+        "run_summary_attrs": set(synth["run_summary"]["attrs"]),
     }
     for name, expected in truth.items():
         if name not in tables:
@@ -587,6 +621,7 @@ def main():
     check_config(repo, keys)
     check_model_tables(repo, mdl)
     check_hdf5_tables(repo, synth)
+    check_exit_status_table(repo)
     lint(repo, version)
 
     errors = [p for p in problems if p[0] == "ERROR"]

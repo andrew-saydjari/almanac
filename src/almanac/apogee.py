@@ -14,6 +14,14 @@ from almanac.data_models.types import ImageType, assigns_sdss_id
 from almanac.data_models.utils import mjd_to_exposure_prefix, get_exposure_path
 
 
+class DatabaseUnavailableError(RuntimeError):
+    """
+    The cross-match needs the SDSS database and it is not connected (raised
+    for the night instead of an obscure KeyError; the main command counts
+    the night as failed, category ``database_error``).
+    """
+
+
 # Full APOGEE ID -> SDSS ID lookup (every DR17 allStar apogee_id), installed
 # only when explicitly requested (`almanac --full-apogee-id-lookup`, via
 # `set_apogee_id_lookup`). When it is None, lookups are targeted: only the
@@ -1121,7 +1129,10 @@ def get_sequences(
     :param fields:
         Tuple of column names to group exposures by.
     :param ignore_interrupting_darks: [optional]
-        Whether to allow (and ignore) dark exposures interrupting sequences.
+        Whether to allow (and ignore) dark exposures interrupting sequences:
+        a dark between two exposures of `image_type` (with the same `fields`)
+        does not split their sequence. A sequence never starts or ends with a
+        dark, and darks alone are not a sequence.
 
     :returns:
         List of tuples containing (start_exposure, end_exposure) for each sequence.
@@ -1135,7 +1146,16 @@ def get_sequences(
 
     sequence_exposure_numbers = []
     for v, group in groupby(s, key=lambda x: tuple(getattr(x, f) for f in fields)):
+        group = list(group)
+        # Exposure numbers of the `image_type` exposures (not the darks).
+        wanted = [e.exposure for e in group if e.image_type == image_type]
         for si, ei in utils.group_contiguous([e.exposure for e in group]):
+            if ignore_interrupting_darks:
+                # Trim leading/trailing darks; drop runs of darks alone.
+                inside = [n for n in wanted if si <= n <= ei]
+                if not inside:
+                    continue
+                si, ei = min(inside), max(inside)
             sequence_exposure_numbers.append((si, ei))
     return sequence_exposure_numbers
 
@@ -1188,6 +1208,16 @@ def parse_target_identifier(target):
                     designation = designation[len(prefix):]
                     break
             return ("coordinate", designation)
+
+
+def _table(lookup, key):
+    """`lookup[key]`; a missing table means the database was not connected."""
+    try:
+        return lookup[key]
+    except KeyError:
+        raise DatabaseUnavailableError(
+            f"cannot cross-match targets ({key} lookup): the SDSS database is not connected"
+        ) from None
 
 
 def cross_match_targets(
@@ -1296,11 +1326,11 @@ def cross_match_targets(
                 key, identifier = parse_target_identifier(target)
                 if key == "coordinate":
                     for lookup_key in ("apogee_id", "twomass_psc"):
-                        target.sdss_id = lookup[lookup_key].get(identifier, -1)
+                        target.sdss_id = _table(lookup, lookup_key).get(identifier, -1)
                         if target.sdss_id != -1:
                             break
                 else:
-                    target.sdss_id = lookup[key].get(identifier, -1)
+                    target.sdss_id = _table(lookup, key).get(identifier, -1)
 
 
 def get_almanac_data(

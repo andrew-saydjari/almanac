@@ -477,3 +477,71 @@ class TestRobotsNotMoved:
                 )
         assert results[False] == ([42, 43, 44, 45], [False, True, True, False], "enabled")
         assert results[True] == ([42, 43, 44, 45], [False, False, False, False], "disabled")
+
+
+def fps_exposures(n=3, config=7001):
+    """FPS object exposures 1..n of one configuration (mjd 60000), 3 science fibers + 1 sky."""
+    from almanac.data_models.fps import FPSTarget
+    exposures = []
+    for i in range(1, n + 1):
+        e = Exposure(observatory="apo", mjd=60000, exposure=i, imagetyp="Object", configid=config)
+        e._targets = tuple(
+            FPSTarget(
+                category="sky_apogee" if f == 4 else "science", racat=10.0 + f, deccat=-20.0,
+                fiberId=f, catalogid=-1 if f == 4 else 5_000_000_000 + f,
+                tmass_id=f"2M{f:08d}-0000000", assigned=1, on_target=1,
+            )
+            for f in (1, 2, 3, 4)
+        )
+        exposures.append(e)
+    return exposures
+
+
+class TestRetargetFPS:
+    """retarget_fibers on an FPS night (bug C: it raised a ValidationError)."""
+
+    def _apply(self):
+        exposures = fps_exposures()
+        entries = parse_overrides(doc(
+            entry(id="fps-star", mjd=60000, exposures="2", action="retarget_fibers",
+                  fibers={2: "HD 1"}, other_fibers="keep"),
+            entry(id="fps-vesta", mjd=60000, exposures="3", action="retarget_fibers",
+                  fibers={3: "VESTA"}, other_fibers="offtarget"),
+        ))
+        apply_exposure_overrides(exposures, entries)
+        apply_fiber_overrides(exposures, entries, TEST_TARGETS)
+        return exposures
+
+    def test_fields(self):
+        e1, e2, e3 = self._apply()
+        assert e2.config_id == 1010000001 and e2.original_config_id == 7001
+        t = {x.fiber_id: x for x in e2.targets}
+        assert t[2].category == "science" and t[2].override_kind == "star"
+        assert t[2].override_target == "HD 1" and t[2].original_category == "science"
+        assert t[2].twomass_designation == "00050000+6748000" and t[2].catalogid == -1
+        assert (t[2].ra, t[2].dec) == (1.25, 67.8) and t[2].sdss_id == -1
+        assert t[1].catalogid == 5_000_000_001 and t[1].override_id == ""
+        v = {x.fiber_id: x for x in e3.targets}
+        assert v[3].override_kind == "solar_system" and v[3].sdss_id == 0
+        assert v[3].twomass_designation == "" and v[3].catalogid == -1
+        assert v[1].category == OFF_TARGET_CATEGORY and v[4].category == "sky_apogee"
+        # The reference table is untouched.
+        assert [x.twomass_designation for x in e1.targets][:2] == ["2M00000001-0000000", "2M00000002-0000000"]
+
+    def test_cross_match(self, monkeypatch):
+        """The retargeted star goes through the ordinary cross-match (2MASS designation)."""
+        import almanac.database as database
+        from almanac import apogee
+
+        monkeypatch.setattr(database, "is_database_available", True, raising=False)
+        monkeypatch.setattr(apogee, "catalogid_sdss_id_lookup",
+                            lambda ids: {i: i - 5_000_000_000 + 100 for i in ids})
+        monkeypatch.setattr(apogee, "get_apogee_id_lookup",
+                            lambda ids: {"00050000+6748000": 777} if "00050000+6748000" in ids else {})
+        monkeypatch.setattr(apogee, "twomass_sdss_id_lookup", lambda ids: {})
+        exposures = self._apply()
+        apogee.cross_match_targets(exposures, apogee.get_science_sequences(exposures),
+                                   xmatch=True, include_first_exposure_per_fiber_map_key=True)
+        t = {x.fiber_id: x for x in exposures[1].targets}
+        assert t[2].sdss_id == 777 and t[1].sdss_id == 101
+        assert {x.fiber_id: x.sdss_id for x in exposures[2].targets}[3] == 0

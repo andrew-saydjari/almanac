@@ -127,7 +127,7 @@ exposure order:
 | Dataset | Definition |
 |---------|------------|
 | `objects` | Runs of consecutive `object` exposures with the same `field_id`, `plate_id` and `config_id` (after the exposure overrides, so an exposure with its own synthetic fiber-table ID is a run of its own) |
-| `arclamps` | Runs of `arclamp` exposures with the same `dithered_pixels`, where `dark` exposures do not interrupt a run. Darks are selected together with the arc lamps, so leading or trailing darks are inside a range, and a run of darks alone (same dither) is also an entry |
+| `arclamps` | Runs of `arclamp` exposures with the same `dithered_pixels`, where `dark` exposures (same dither) between two arc lamps do not interrupt a run. A range starts and ends with an arc lamp; darks alone are not an entry |
 | `missing` | Runs of exposure numbers with `image_type = "missing"` |
 
 The object sequences are the visits of a night. They decide which exposures' fiber
@@ -501,9 +501,50 @@ parallel datasets:
 | `db_unavailable` | Sentinel (`exposure = -1`) recording that the database could not be reached for this night, so trailing missing exposures are undetectable |
 
 Entries are refreshed per observatory/MJD pair on each run; pairs not processed in a run
-(skipped with `--skip-existing`, or failed) keep their previous entries. Exposures missing
+(skipped with `--skip-existing`, or failed) keep their previous entries. The table is
+written at the end of a run (also when it is stopped by a signal). After a run killed
+outright (`kill -9`), the nights it wrote whose rows were not recorded are listed in the
+`/missing_exposures_pending` dataset (strings `"obs/mjd"`); the next run with
+`--skip-existing` processes them again and removes the dataset. It is absent from a file
+whose last run ended normally. Exposures missing
 on disk also appear in `raw/{observatory}/{mjd}/exposures` with `image_type="missing"` so
 that exposure numbering stays dense.
+
+## Run summary
+
+Every run of `almanac --output` writes the `/run_summary` group: a table of the nights that
+had a problem, accumulated over runs into the same file (rows of an earlier run are kept for
+nights this run did not process, e.g. skipped with `--skip-existing`; a night retried
+successfully is removed), with the counts of the last run as attributes.
+
+<!-- audit:table run_summary -->
+| Dataset | Type | Description |
+|---------|------|-------------|
+| `observatory` | string | Observatory ("apo" or "lco") |
+| `mjd` | integer | MJD of the night |
+| `category` | string | `exception`, `database_error`, `write_failed`, `pool_broken` (the night is not in the file) or `db_unavailable` (written without the operations database) |
+| `message` | string | The error message (empty for `db_unavailable`) |
+
+<!-- audit:table run_summary_attrs -->
+| Attribute | Description |
+|-----------|-------------|
+| `last_run_n_requested` | Observatory/MJD pairs requested |
+| `last_run_n_skipped_existing` | Skipped by `--skip-existing` |
+| `last_run_n_with_data` | Processed, with exposures (written) |
+| `last_run_n_no_data` | Processed, no exposure files on disk (nothing written) |
+| `last_run_n_failed` | Failed (not written) |
+| `last_run_n_db_unavailable` | Written without the operations database |
+| `last_run_n_not_processed` | Not reached because the run was stopped by a signal |
+| `last_run_n_exception` | Failed, category `exception` |
+| `last_run_n_database_error` | Failed, category `database_error` |
+| `last_run_n_write_failed` | Failed, category `write_failed` |
+| `last_run_n_pool_broken` | Failed, category `pool_broken` |
+| `last_run_n_lock_retries` | Opens of the file retried because its lock was briefly taken (not a problem by itself; see the CLI reference) |
+| `last_run_exit_status_name` | Name of the exit status (`almanac.exit_codes.ExitStatus`, or `SIGTERM` etc. for 128 + signal) |
+| `last_run_exit_status` | Exit status of the run (see [exit status](cli-reference.md#fault-tolerance-and-exit-status)) |
+| `last_run_finished_utc` | When the run finished (UTC, ISO 8601) |
+| `last_run_almanac_version` | almanac version |
+| `last_run_cross_match` | Whether the cross-match was requested (`--fibers` without `--no-x-match`) |
 
 ## Catalog metadata (`/meta`)
 

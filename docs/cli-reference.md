@@ -164,13 +164,81 @@ workers keep reading files meanwhile.
 
 - Transient database connection errors are retried with exponential backoff
   (`database_retry_attempts`, `database_retry_backoff`).
-- A night that fails is logged and skipped; the failed nights are listed at the end with
-  a reminder to re-run with `--skip-existing`. **The exit status is 0 even when nights
-  failed**: check the log, or the nights in the output file.
-- If the operations database cannot be reached for a night, the night is still written
-  and `/missing_exposures` records a `db_unavailable` row for it.
+- A night that fails is logged and skipped; the run goes on. Every run ends with a
+  summary (always logged): the number of nights requested, skipped by `--skip-existing`,
+  with data, without data, failed, and built without the operations database, then the
+  failed nights with their category and error, and a reminder to re-run with
+  `--skip-existing`. With `--output` the same is written to the
+  [`/run_summary`](data-formats.md#run-summary) group of the file.
+- If the operations database cannot be reached for a night's expected exposures, the
+  night is still written and `/missing_exposures` records a `db_unavailable` row for it.
 - An invalid night selection (for example two selection options) raises an error (exit
-  status 1); a malformed override file fails before any night is processed.
+  status 1 or 2); a malformed override file fails before any night is processed.
+
+Exit statuses (`almanac.exit_codes.ExitStatus`): one per kind of problem, increasing with
+severity. A run in which several kinds occur exits with the **highest**; the summary and
+`/run_summary` count every kind. 1 and 2 are click's (an error message, bad usage), and a
+run stopped by a signal exits with 128 + the signal number.
+
+<!-- audit:table exit_status -->
+| Name | Code | Meaning | Commands |
+|------|------|---------|----------|
+| `OK` | 0 | Nothing went wrong (nights without data and `--skip-existing` skips are not problems) | all |
+| `DB_UNAVAILABLE` | 3 | The operations database could not be queried for a night's expected exposures, cross-match not requested; the night is written, only its missing-exposure check is incomplete (`db_unavailable`) | `almanac` |
+| `DB_UNAVAILABLE_CROSS_MATCH` | 4 | The same, with the cross-match requested (`--fibers` without `--no-x-match`); the night is written | `almanac` |
+| `NIGHT_REFUSED` | 5 | A night was refused (stored exposures or sequences differ from the re-processed ones) and left untouched | `add fibers` |
+| `NIGHT_EXCEPTION` | 6 | An exception while processing a night (a plugmap without a `PLUGMAPOBJ` table, a missing confSummary, an unreadable raw file, or a bug); the night is not written | `almanac`, `add fibers`, `lookup -O` |
+| `DATABASE_ERROR` | 7 | A database error that persisted after the retries (cross-match lookups; `add metadata` batches), or a cross-match without a database connection; the night (batch) is not written | `almanac`, `add fibers`, `lookup -O`, `add metadata` |
+| `WRITE_FAILED` | 8 | Writing a night to the output file failed | `almanac`, `add fibers`, `lookup -O` |
+| `POOL_BROKEN` | 9 | The worker process pool broke (e.g. a worker was killed); its outstanding nights are not written | `almanac`, `add fibers` |
+
+What can happen to a requested night of `almanac`:
+
+| Night | In the file | Logged | Category in `/run_summary` | Exit status |
+|-------|-------------|--------|----------------------------|-------------|
+| Built normally (holes and missing raw files are recorded in `/missing_exposures`) | yes | summary count | (none) | 0 |
+| No exposure files on disk | no (only `/missing_exposures` rows, e.g. `db_no_file`) | summary count | (none) | 0 |
+| Skipped by `--skip-existing` (already in the file) | unchanged | summary count | earlier rows kept | 0 |
+| Operations database not reachable for the expected exposures | yes (missing-exposures check incomplete) | warning, listed at the end | `db_unavailable` | 3, or 4 with the cross-match |
+| Exception while processing | no | error + traceback, listed at the end | `exception` | 6 |
+| Database error after the retries, or cross-match without a connection | no | as above | `database_error` | 7 |
+| Writing the night failed | no | as above | `write_failed` | 8 |
+| Worker process pool broke | no | as above | `pool_broken` | 9 |
+| Not reached because the run was stopped by a signal | no | summary count (`not processed`) | (none) | 128 + signal |
+
+Without `--output` the same statuses apply. The two categories that cannot be told apart
+reliably are kept together: `NIGHT_EXCEPTION` covers bad input and bugs alike.
+
+### File locking
+
+HDF5 locks the output file while it is open, so a second process writing the same file is
+refused. Because the file is opened once per night, an open can briefly find the lock of the
+previous (just closed) session not yet released, which happens on Ceph, where the lock
+release after a close is asynchronous. The open is therefore retried with exponential backoff
+(0.1 s doubling, at most 10 s apart, about 60 s in total), each retry logged as a warning and
+counted in the summary (`lock retries`, `/run_summary` `last_run_n_lock_retries`); only then
+does the night fail as `WRITE_FAILED`. A lock held longer (a real second writer) is still
+refused. A build that is known to be the only writer of its file may set
+`HDF5_USE_FILE_LOCKING=FALSE` to skip locking altogether (then nothing protects the file from
+a second writer).
+
+### Stopping a run
+
+SIGINT (Ctrl-C), SIGTERM (`kill PID`, and what a Slurm time limit sends first) and SIGHUP
+stop a run cleanly: the worker processes are killed, the nights already processed are
+written (at most `max(4, 2 x --processes)` are queued), the missing-exposures table and run
+summary are written, and the exit status is 128 + the signal number (130, 143, 129).
+SIGINT works for background jobs too (a shell starts `&` jobs with SIGINT ignored; almanac
+handles it anyway); SIGHUP is left ignored under `nohup`. Re-run the same command with
+`--skip-existing` to continue.
+
+`kill -9` (SIGKILL, or the out-of-memory killer) cannot be handled. The output file is
+opened only while a night is written and is flushed and closed after every night, so it
+stays readable, up to the last night written; the worker processes die with the main
+process. Nights written by a killed run whose missing-exposure rows were not recorded yet
+are listed in `/missing_exposures_pending`, and the next run with `--skip-existing`
+processes them again instead of skipping them. (A kill while a night that replaces one
+already in the file is being written can damage that night; rebuild it.)
 
 ## `almanac add fibers`
 
@@ -191,7 +259,7 @@ and sequences are compared with the stored ones, column by column in the stored
 representation. A night that would differ (the override list changed since the night was
 built, the night was built with the other `--no-overrides` setting, a file from before the
 overrides on a night that now has one, or raw files appeared or disappeared so that
-`chip_flags` changes) is refused, left untouched, and listed at the end (exit status 1):
+`chip_flags` changes) is refused, left untouched, and listed at the end (exit status 5):
 rebuild it with `almanac`. Every fiber table of an accepted night is replaced, and the
 night attributes are rewritten (stale `apogee_id_lookup_*` attributes are removed with
 `--no-x-match`).
@@ -206,7 +274,12 @@ every night in INPUT with an exposures table); `--output`/`-O`, `--in-place`;
 `--full-apogee-id-lookup`; `--live-apogee-id-join`; `--processes`/`-p` and
 `--query-workers` (as for `almanac`). There is no British-spelling alias for `add fibers`.
 
-**Exit status**: 1 if no night is selected, or if any night was refused or failed.
+**Exit status**: 1 if no night is selected; otherwise the highest of the
+[exit statuses](#fault-tolerance-and-exit-status) of its problems (5 refused, 6 exception,
+7 database error, 8 write failed, 9 pool broken); 128 +
+the signal number when stopped by SIGINT, SIGTERM or SIGHUP (the nights already written are
+kept; each night is written, flushed and closed on its own, so a killed run leaves a
+readable file).
 
 ## `almanac add metadata`
 
@@ -223,7 +296,8 @@ fixed row without a query: `lead = "solar_system"`, every catalog column at its 
 
 If none of the selected nights has fiber mappings, it exits with status 1 and writes
 nothing (no `/meta`, no output file, no checkpoint); nights without fiber mappings are
-counted in a warning and skipped.
+counted in a warning and skipped. A batch that still fails after `--max-batch-attempts` stops the build with exit status 7
+(`DATABASE_ERROR`; the checkpoint is kept, re-run to resume); other errors exit with 1.
 
 **Never write the almanac file a pipeline reads.** Either decorate a copy, or write a
 targets-only file:
@@ -309,9 +383,10 @@ a section name prints the whole section.
 
 ### `almanac config set <key> <value>`
 Set one setting and save the file. Nested settings use dot notation; a whole section
-cannot be set at once. The value is stored as text (a YAML string, e.g.
-`logging_level: '10'`); almanac converts the numeric settings when it reads them. Edit
-the file directly for list values (`display_field_names`).
+cannot be set at once. The value is converted to the type of the key (integer, number,
+text, or a list as YAML or comma-separated); a value that does not fit is refused (exit
+status 1) and nothing is saved. `almanac config update <key> <value>` is a hidden,
+deprecated alias.
 
 ```bash
 almanac config set logging_level 10
@@ -337,19 +412,18 @@ without `--overwrite`.
   `almanac.data_models.types.IDENTIFIED_STAR_CATEGORIES`): `catalogid`, `n_visits`
   (nights; also per observatory), `n_exposures` (object exposures, flagged ones included;
   also per observatory), and `mjd_min_*`/`mjd_max_*` per observatory (-1 if none). The
-  hand-placed solar-system body (`sdss_id` 0) is counted. Fibers that were not matched to
-  an `sdss_id` are pooled in one row with `sdss_id = -1`. `--format hdf5` is refused
-  (FITS or CSV; an `.h5` extension writes an astropy HDF5 table).
+  hand-placed solar-system body (`sdss_id` 0) is counted. Fibers without an `sdss_id`
+  (`sdss_id < 0`: not matched, or not assigned one) are not counted; their number is
+  logged. HDF5 output has one dataset per column.
 - `dump exposures`: every row of every `raw/<obs>/<mjd>/exposures` table (all `Exposure`
   columns).
-- `dump fibers`: every row of every fiber table (the union of the FPS and plate columns,
-  with defaults where a column is absent). The rows do not record which night or table
-  they came from. FITS output fails (the `observatory` column mixes strings and empty
-  values); use CSV or HDF5.
+- `dump fibers`: every row of every fiber table: `mjd` and `fiber_map_key` (the night and
+  the table, `raw/<observatory>/<mjd>/fibers/<fiber_map_key>`), then the union of the FPS
+  and plate columns, with defaults where a table lacks a column; `observatory` is the
+  night's for every row.
 - `dump visits`: not implemented (does nothing).
 
-`dump exposures` and `dump fibers` expect both `raw/apo` and `raw/lco` in INPUT, and
-`dump fibers` a fiber group in every night; otherwise they stop with a `KeyError`.
+A file may hold one observatory only, and nights without fiber tables are skipped.
 
 ## `almanac lookup`
 
@@ -360,9 +434,9 @@ almanac lookup IDENTIFIER [IDENTIFIER ...] [--output FILE]
 Finds where SDSS-V targets were observed: each IDENTIFIER is an `sdss_id` or a
 `catalogid`; every catalogid of the matching `sdss_id` is looked up in `targetdb`
 (assignments with status 1) and the matching exposures are printed as a table (FPS era
-only). It first prints one `Success`/`Failed` line per `targetdb` model it probes. With
-`--output`, every night found is written to FILE with fiber mappings (cross-matched, with
-overrides), but without the per-night attributes and without `/missing_exposures`.
+only). With `--output`, every night found is written to FILE as `almanac --fibers` writes
+it (cross-matched, with overrides, with the night attributes), but without
+`/missing_exposures`.
 
 ## `almanac pgdump` and `almanac pgrestore`
 
@@ -392,8 +466,7 @@ Upstream's post-reduction summary: from an almanac file decorated with `add meta
 and the arMADGICS outputs found relative to it (`<dir of INPUT>/../arMADGICS/...`), it
 writes `<OUTPUT_PREFIX>exposures.h5` and `<OUTPUT_PREFIX>stars.h5` with barycentric
 corrections, moon and airmass metadata, and shadow heights. The fork's pipelines do not
-use it. After writing both files it stops with a `NameError` (`unknown_carton_pks`).
-`--processes` defaults to the CPU budget, as for `almanac`.
+use it. `--processes` defaults to the CPU budget, as for `almanac`.
 
 ## `almanac flag`
 

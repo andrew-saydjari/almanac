@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from pydantic.fields import (FieldInfo, ComputedFieldInfo)
 from pydantic_core import PydanticUndefined
 import datetime
+from contextlib import contextmanager
 from enum import Enum
 
 from almanac.data_models import Exposure
@@ -351,6 +352,215 @@ def write_missing_exposures(fp, rows, replace_keys=None):
     for name, data in datasets.items():
         dataset = group.create_dataset(name, data=data)
         dataset.attrs["description"] = _MISSING_EXPOSURES_DESCRIPTIONS[name]
+    return group
+
+
+#: Total time [s] `open_h5_retrying` keeps retrying an open that fails
+#: because the HDF5 file lock is taken, and its first delay / largest delay.
+LOCK_RETRY_BUDGET = 60.0
+LOCK_RETRY_FIRST_DELAY = 0.1
+LOCK_RETRY_MAX_DELAY = 10.0
+
+#: Number of lock retries in this process (reported by the main command).
+lock_retry_count = 0
+
+
+def is_lock_error(exception) -> bool:
+    """True for HDF5's "unable to lock file" (EAGAIN / EWOULDBLOCK) open error."""
+    import errno
+
+    return (
+        getattr(exception, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK)
+        or "unable to lock file" in str(exception)
+    )
+
+
+def open_h5_retrying(path, mode="a", budget=None, _open=None, _sleep=None):
+    """
+    `h5py.File(path, mode)`, retrying for up to `budget` seconds
+    (`LOCK_RETRY_BUDGET`, 60 s) with exponential backoff (0.1 s doubling, at
+    most 10 s apart) while the open fails because the HDF5 file lock is held.
+
+    On Ceph (a FUSE file system here) the lock of a just-closed handle is
+    released asynchronously by the file system, so reopening the file right
+    after closing it can briefly find the lock still taken. Each retry is
+    logged at warning level with its attempt number. A real second writer
+    keeps the lock for longer than the budget, so it is still refused (the
+    last error is raised). Other errors are raised at once.
+    """
+    import time
+    from almanac import logger
+
+    global lock_retry_count
+    _open = _open or h5.File
+    _sleep = _sleep or time.sleep
+    budget = LOCK_RETRY_BUDGET if budget is None else budget
+    delay, waited, attempt = LOCK_RETRY_FIRST_DELAY, 0.0, 1
+    while True:
+        try:
+            return _open(path, mode)
+        except OSError as e:
+            if not is_lock_error(e) or waited + delay > budget:
+                raise
+            logger.warning(
+                f"{path}: file lock taken (attempt {attempt}; {e}); retrying in {delay:.1f} s"
+            )
+            lock_retry_count += 1
+            _sleep(delay)
+            waited += delay
+            attempt += 1
+            delay = min(delay * 2, LOCK_RETRY_MAX_DELAY)
+
+
+@contextmanager
+def open_for_writing(path):
+    """
+    Open an almanac file for one short write session (``"a"`` mode), and
+    flush and close it at the end of the block.
+
+    The commands that build almanac files open their output only while they
+    write to it (one session per night, and one at the end), so that a run
+    killed outright (SIGKILL, out of memory) leaves a file that is readable up
+    to the last night written. Within a session the HDF5 metadata cache does
+    not evict (write) entries, so the file on disk is only changed in place
+    when the session is closed; the window in which a kill can damage the
+    file is the close itself. (A night that replaces one already in the file
+    can reuse the old night's space within the session, so a kill during that
+    session can damage that one night.) The open is retried while the file
+    lock is taken (`open_h5_retrying`).
+    """
+    fp = open_h5_retrying(path, "a")
+    try:
+        try:
+            config = fp.id.get_mdc_config()
+            config.evictions_enabled = False
+            config.incr_mode = 0  # H5C_incr__off: required to disable evictions
+            config.flash_incr_mode = 0
+            config.decr_mode = 0
+            fp.id.set_mdc_config(config)
+        except Exception:
+            pass
+        yield fp
+    finally:
+        fp.close()
+
+
+# Nights written to the file whose /missing_exposures rows are not recorded
+# yet ("obs/mjd"; written at the end of the run). A run that is killed leaves
+# them listed, and the next run with --skip-existing processes them again
+# instead of skipping them, so their missing-exposure rows are not lost.
+PENDING_MISSING_DATASET = "missing_exposures_pending"
+
+
+def _pending_key(observatory, mjd) -> bytes:
+    return f"{observatory}/{int(mjd)}".encode()
+
+
+def read_pending_missing(fp) -> set:
+    """The (observatory, mjd) pairs listed in /missing_exposures_pending."""
+    if PENDING_MISSING_DATASET not in fp:
+        return set()
+    keys = set()
+    for value in fp[PENDING_MISSING_DATASET][:]:
+        observatory, mjd = value.decode().split("/")
+        keys.add((observatory, int(mjd)))
+    return keys
+
+
+def add_pending_missing(fp, observatory, mjd) -> None:
+    """Append one night to /missing_exposures_pending (resizing it in place)."""
+    if PENDING_MISSING_DATASET not in fp:
+        fp.create_dataset(PENDING_MISSING_DATASET, shape=(0,), maxshape=(None,),
+                          dtype="S16", chunks=(256,))
+    dataset = fp[PENDING_MISSING_DATASET]
+    dataset.resize((len(dataset) + 1,))
+    dataset[-1] = _pending_key(observatory, mjd)
+
+
+def set_pending_missing(fp, keys) -> None:
+    """Replace /missing_exposures_pending by `keys`; remove it if empty."""
+    delete_hdf5_entry(fp, PENDING_MISSING_DATASET)
+    keys = sorted(keys)
+    if keys:
+        fp.create_dataset(
+            PENDING_MISSING_DATASET,
+            data=np.array([_pending_key(o, m) for o, m in keys], dtype="S16"),
+            maxshape=(None,), chunks=(256,),
+        )
+
+
+RUN_SUMMARY_GROUP = "run_summary"
+
+_RUN_SUMMARY_DESCRIPTIONS = {
+    "observatory": "Observatory name",
+    "mjd": "MJD of the night",
+    "category": (
+        "What went wrong: exception | database_error | write_failed | "
+        "pool_broken (the night is not in the file) or db_unavailable (the night "
+        "was written, but the operations database could not be queried for its "
+        "expected exposures)"
+    ),
+    "message": "The error message (empty for db_unavailable)",
+}
+
+
+def read_run_summary(fp) -> List[Dict[str, Any]]:
+    """
+    Read the /run_summary table (nights with a problem, see
+    `write_run_summary`) of an almanac HDF5 file. Empty if absent.
+    """
+    if RUN_SUMMARY_GROUP not in fp:
+        return []
+    group = fp[RUN_SUMMARY_GROUP]
+    rows = []
+    for observatory, mjd, category, message in zip(
+        group["observatory"][:], group["mjd"][:], group["category"][:], group["message"][:]
+    ):
+        rows.append(
+            dict(
+                observatory=observatory.decode(),
+                mjd=int(mjd),
+                category=category.decode(),
+                message=message.decode() if isinstance(message, bytes) else str(message),
+            )
+        )
+    return rows
+
+
+def write_run_summary(fp, rows, attrs, replace_keys):
+    """
+    Write the /run_summary group of an almanac HDF5 file: a table of the
+    nights that had a problem (one row per observatory/MJD; columns
+    observatory, mjd, category, message) and, as attributes, the counts of
+    the run that wrote it (``last_run_*``).
+
+    The table accumulates over runs into the same file (like
+    /missing_exposures): rows of a previous run are kept for observatory/MJD
+    pairs not in ``replace_keys`` (the pairs this run processed or tried to
+    process), so a night that failed and was not retried stays listed, and a
+    night that was retried successfully is removed.
+    """
+    preserved = [
+        r for r in read_run_summary(fp)
+        if (r["observatory"], r["mjd"]) not in replace_keys
+    ]
+    rows = sorted(preserved + list(rows), key=lambda r: (r["observatory"], r["mjd"]))
+
+    delete_hdf5_entry(fp, RUN_SUMMARY_GROUP)
+    group = fp.create_group(RUN_SUMMARY_GROUP, track_order=True)
+    datasets = dict(
+        observatory=np.array([r["observatory"] for r in rows], dtype="S3"),
+        mjd=np.array([r["mjd"] for r in rows], dtype=np.int64),
+        category=np.array([r["category"] for r in rows], dtype="S16"),
+        message=np.array(
+            [str(r["message"]).encode("utf-8") for r in rows],
+            dtype=h5.string_dtype("utf-8"),
+        ),
+    )
+    for name, data in datasets.items():
+        dataset = group.create_dataset(name, data=data)
+        dataset.attrs["description"] = _RUN_SUMMARY_DESCRIPTIONS[name]
+    group.attrs.update(attrs)
     return group
 
 

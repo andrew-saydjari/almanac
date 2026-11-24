@@ -120,9 +120,10 @@ The fiber edits are applied **before** the cross-match. In each edited table:
   `offtarget` (no `sdss_id`), with `original_category` and `override_id` set. Every
   shipped entry uses `offtarget`: the telescope was pointed away from the plate field.
 
-All shipped `retarget_fibers` entries are plate-era nights (2011). Retargeting an FPS
-fiber is not supported yet: the row rewrite sets plate-era columns and fails on an FPS
-fiber table.
+All shipped `retarget_fibers` entries are plate-era nights (2011). An FPS fiber can be
+retargeted the same way: the row gets the hand-placed target's `twomass_designation`,
+`catalogid`, `ra` and `dec` (on a plate row `twomass_id`, with `target_ids` cleared) and is
+cross-matched as usual; the other confSummary columns of the row are kept.
 
 The 2011 hand-placed-star tests are a generated block of the override file; see
 `scripts/handplaced_targets/README.md` for the inventory, the rebuild scripts and the data

@@ -6,6 +6,59 @@ Change Log
 
 Unreleased (fork)
 -----------------
+* Opening the output for a night's write session is retried while the HDF5 file lock is
+  taken (``io.open_h5_retrying``: 0.1 s doubling, at most 10 s apart, about 60 s in total,
+  each retry logged; counted in ``last_run_n_lock_retries``), and only then does the night
+  fail as ``WRITE_FAILED``. On Ceph a reopen right after a close could find the previous
+  session's lock not yet released. Also used by ``add fibers``, ``lookup -O`` and the in-place
+  ``add metadata`` write. A real second writer is still refused; single-writer builds may set
+  ``HDF5_USE_FILE_LOCKING=FALSE``.
+* Arc-lamp sequences (``sequences/arclamps``) no longer start or end with darks, and darks
+  alone are no longer a sequence; darks between two arc lamps (same dither) still do not
+  break a run. Changes ``sequences/arclamps`` in built files (nothing in
+  ApogeeReduction.jl reads sequences).
+* ``lookup`` no longer prints debug ``Success``/``Failed`` lines, and ``lookup -O`` writes
+  nights as ``almanac --fibers`` does, night attributes included (``io.write_night_attrs``).
+* ``dump``: ``exposures``/``fibers`` (and ``postprocess``) work on files with one observatory;
+  ``dump fibers`` rows carry ``mjd`` and ``fiber_map_key`` and a filled ``observatory`` (FITS
+  output works); ``dump stars`` writes HDF5 and no longer pools fibers without an
+  ``sdss_id`` into a fake star ``sdss_id = -1`` (``sdss_id`` 0, solar system, still counted).
+* ``postprocess`` no longer stops with a ``NameError`` (``unknown_carton_pks``, left from the
+  old metadata code; unknown cartons are recorded by ``add metadata`` on ``/meta``).
+* ``config set`` converts the value to the key's declared type (int, float, bool, str, list)
+  and refuses a value that does not fit; the hidden ``config update`` alias no longer
+  crashes (it called the builtin ``set``). ``config.set_config_value``, ``coerce_value``.
+* ``retarget_fibers`` works on FPS fibers: the row rewrite sets the FPS identifier fields
+  (``twomass_designation``, ``catalogid``, ``ra``, ``dec``) instead of the plate-only
+  ``target_ids``/``twomass_id`` (which raised a ValidationError), and the row is
+  cross-matched as usual. No shipped entry is FPS, so no output changes.
+* Stopping a build no longer corrupts the output file. The main command and ``add fibers``
+  open the output only while writing it (one session per night, flushed and closed; HDF5
+  metadata-cache evictions disabled within a session), so a run killed with SIGKILL leaves
+  a file readable up to the last night written; workers are never forked while it is open
+  (they no longer hold its lock) and die with the main process (Linux
+  ``PR_SET_PDEATHSIG``). SIGTERM and SIGHUP are handled like SIGINT, and SIGINT is handled
+  in background jobs too (``almanac.signals``): workers are killed, processed nights
+  written, ``/missing_exposures`` and ``/run_summary`` written, exit status 128 + signal.
+  Nights written by a killed run are listed in ``/missing_exposures_pending`` and processed
+  again by the next ``--skip-existing`` run, so their missing-exposure rows are not lost.
+* Exit statuses: one per kind of problem, increasing with severity, defined once in
+  ``almanac.exit_codes.ExitStatus`` and used by ``almanac``, ``add fibers``, ``add metadata``
+  and ``lookup -O``; a run exits with the highest that occurred: 3 ``DB_UNAVAILABLE``
+  (nights written, no cross-match; was 0), 4 ``DB_UNAVAILABLE_CROSS_MATCH``, 5
+  ``NIGHT_REFUSED`` (``add fibers``; was 1), 6 ``NIGHT_EXCEPTION``, 7 ``DATABASE_ERROR``
+  (also ``add metadata`` batches; was 1), 8 ``WRITE_FAILED``, 9 ``POOL_BROKEN``. The code and
+  its name are stored in ``/run_summary`` (``last_run_exit_status[_name]``), with a count
+  per category. This supersedes the 3/4 statuses of the entry below.
+* Main command: end-of-run summary and exit status. Every run logs the number of nights
+  requested, skipped by ``--skip-existing``, with data, without data, failed and built
+  without the operations database, and lists the failed nights with a category
+  (``exception``, ``database_error``, ``write_failed``, ``pool_broken``); with ``--output``
+  the same is written to the new ``/run_summary`` group (accumulated over runs). The exit
+  status is now 3 when any night failed, and 4 when the operations database could not be
+  queried for a night while the cross-match was requested; nights without data and
+  ``--skip-existing`` skips stay 0. A cross-match without a database connection raises
+  ``apogee.DatabaseUnavailableError`` instead of a ``KeyError``.
 * ``almanac add fibers`` adds fiber mappings to an almanac file built without ``--fibers``,
   by running the same night pipeline as ``almanac --fibers`` (``apogee.process_night``:
   exposure overrides, fiber overrides including hand-placed targets and synthetic table
