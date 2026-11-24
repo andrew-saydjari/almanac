@@ -550,6 +550,13 @@ opportunity, and the `sdss5_target_flags` bitmask), plus the 79 columns of
 Each column has a `description` attribute. A hand-placed solar-system body has a fixed
 row: `sdss_id = 0`, `lead = "solar_system"`, every catalog column at its default.
 
+The width of `sdss5_target_flags` (bytes per row) depends on the installed
+`sdss-semaphore`, which can only encode the cartons it knows (recorded in the
+`sdss_semaphore_version` attribute; unknown cartons are listed in `unknown_carton_pks`
+and kept in `meta_carton_pks`). For example, sdss-semaphore 0.2.9 gives 73 bytes where
+0.2.8 gave 71 on the same targets, with the first 71 bytes unchanged: zero-pad the
+narrower array before combining `/meta` tables built with different versions.
+
 Side groups:
 
 <!-- audit:table meta_side_groups -->
