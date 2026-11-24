@@ -2996,7 +2996,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.4,<7" },
     { name = "rich", specifier = ">=15.0.0,<16" },
     { name = "scipy", specifier = ">=1.17.1,<2" },
-    { name = "sdss-semaphore", specifier = ">=0.2.8,<0.2.9" },
+    { name = "sdss-semaphore", specifier = ">=0.2.8,<0.3" },
     { name = "sdssdb", specifier = ">=1.1.3,<2" },
     { name = "sphinx", marker = "extra == 'dev'", specifier = ">=9.0.4,<10" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=9.0.4,<10" },
@@ -3012,16 +3012,16 @@ provides-extras = ["dev", "docs"]
 
 [[package]]
 name = "sdss-semaphore"
-version = "0.2.8"
+version = "0.2.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "astropy" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/89/22/7ec787050d59509df98a19974005dcc4229ed48d1e9d160baffff69e6a7e/sdss_semaphore-0.2.8.tar.gz", hash = "sha256:388565d080ce144beae9f5b1d38c77b04b212db2f3382440790125f65e9a22e0", size = 50084, upload-time = "2025-08-26T15:15:32.018Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/17/90899a725fcc48b44bc1669a8c5ae2822831e18914af6303a7f0ed8077ec/sdss_semaphore-0.2.9.tar.gz", hash = "sha256:47e15d00c2b89e96a6237fa99a3ef6e20fcfe97ac3f54b826225bcac3e9dc38c", size = 50353, upload-time = "2026-07-28T18:28:01.455Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/1b/c86e8565c0af82ea7902a157fae1f2d7ff64626416d5dc9ccb6b6330354e/sdss_semaphore-0.2.8-py3-none-any.whl", hash = "sha256:fafae89e32f24b94f9ced9d77f1e2856fbc6713a63e9a03a07cbe822ef7b2ab6", size = 49228, upload-time = "2025-08-26T15:15:30.66Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/6c/886cdba67a24555022497989d862be4e449662eb405a697587850400d53a/sdss_semaphore-0.2.9-py3-none-any.whl", hash = "sha256:989dc5806cbfb6e22920849e3ad8780b1563f38d3fa67e8e7c54e9c93e1d9264", size = 49514, upload-time = "2026-07-28T18:28:00.271Z" },
 ]
 
 [[package]]

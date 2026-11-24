@@ -37,10 +37,7 @@ dependencies = [
     "colorlog>=6.12.0,<7",
     "rich>=15.0.0,<16",
     "pydantic>=2.14.4,<3",
-    # Capped below 0.2.9: 0.2.9 knows more cartons, which widens
-    # /meta/sdss5_target_flags (71 -> 73 bytes) and changes unknown_carton_pks
-    # (measured 2026-11-24). Lift deliberately, together with a /meta rebuild.
-    "sdss-semaphore>=0.2.8,<0.2.9",
+    "sdss-semaphore>=0.2.8,<0.3",
     # `almanac add metadata --extended` (HEALPix index); from upstream a922dee.
     "healpy>=1.20.0,<2",
     # Imported directly by almanac; previously present only as transitive
